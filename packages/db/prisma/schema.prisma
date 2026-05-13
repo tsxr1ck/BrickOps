@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id             String    @id @default(cuid())
+  name           String
+  slug           String    @unique
+  status         String    @default("draft") // draft, awaiting_clarification, planning, etc.
+  source         String    // web, whatsapp, imported
+  repoUrl        String?
+  workspacePath  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  threads        ProjectThread[]
+  runs           Run[]
+  approvals      Approval[]
+  workspaces     Workspace[]
+}
+
+model ProjectThread {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  role      String   // user, assistant, system
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model Run {
+  id             String    @id @default(cuid())
+  projectId      String
+  project        Project   @relation(fields: [projectId], references: [id])
+  currentStage   String    // planning, coding, reviewing...
+  failureReason  String?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  steps          RunStep[]
+}
+
+model RunStep {
+  id        String   @id @default(cuid())
+  runId     String
+  run       Run      @relation(fields: [runId], references: [id])
+  name      String   // classification, planning, coding_batch_1...
+  status    String   // pending, active, completed, failed
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+}
+
+model Approval {
+  id          String    @id @default(cuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id])
+  title       String
+  summary     String
+  riskLevel   String    // low, medium, high
+  payload     Json?
+  channel     String    // web, whatsapp
+  status      String    @default("pending") // pending, approved, rejected
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model Workspace {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  localPath   String
+  gitBranch   String
+  repoMode    String   // new, existing
+  lockState   String   @default("unlocked")
+  updatedAt   DateTime @updatedAt
+}
+
+model FileIndex {
+  id            String   @id @default(cuid())
+  filePath      String
+  hash          String
+  language      String
+  symbols       Json     // array of symbols
+  imports       Json     // array of imports
+  exports       Json     // array of exports
+  lastIndexedAt DateTime @default(now())
+
+  projectId     String
+}
+
+model PromptUsage {
+  id               String   @id @default(cuid())
+  provider         String
+  model            String
+  promptTokens     Int
+  cachedTokens     Int
+  completionTokens Int
+  stepId           String?
+  createdAt        DateTime @default(now())
+}
+
+model WhatsappAccount {
+  id              String   @id @default(cuid())
+  operatorPhone   String   @unique
+  sessionId       String?
+  connectionState String   @default("disconnected")
+  updatedAt       DateTime @updatedAt
+}
+
+model Notification {
+  id             String   @id @default(cuid())
+  channel        String   // web, whatsapp
+  type           String   // approval, status, failure
+  message        String
+  deliveryStatus String   @default("pending") // pending, delivered, failed
+  createdAt      DateTime @default(now())
+}

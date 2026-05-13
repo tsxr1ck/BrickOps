@@ -1,0 +1,203 @@
+import { useState, useEffect, useCallback } from 'react';
+
+const API_BASE = 'http://localhost:3001';
+
+function mapProject(p: any) {
+  const summary = p.threads?.find((t: any) => t.role === 'user')?.content || p.description || 'No description provided.';
+  const lastAction = p.runs?.[0]?.steps?.find((s: any) => s.status === 'active')?.name || p.status;
+  return { ...p, summary, lastAction };
+}
+
+export function useProjects() {
+  const [projects, setProjects] = useState<any[]>([]);
+
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/projects`);
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(data.map(mapProject));
+      }
+    } catch (err) {
+      console.error('Failed to fetch projects', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProjects();
+
+    const evtSource = new EventSource(`${API_BASE}/events`);
+    evtSource.addEventListener('project.update', () => fetchProjects());
+    evtSource.addEventListener('project.created', () => fetchProjects());
+    
+    return () => evtSource.close();
+  }, [fetchProjects]);
+
+  return { projects };
+}
+
+export function useProject(slugOrId: string) {
+  const [project, setProject] = useState<any | null>(null);
+  const [run, setRun] = useState<any | null>(null);
+
+  const fetchProject = useCallback(async () => {
+    if (!slugOrId) return;
+    try {
+      const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(slugOrId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setProject(mapProject(data));
+        if (data.runs && data.runs.length > 0) {
+          setRun(data.runs[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch project', err);
+    }
+  }, [slugOrId]);
+
+  useEffect(() => {
+    fetchProject();
+
+    if (project?.id) {
+      const evtSource = new EventSource(`${API_BASE}/events/project/${project.id}`);
+      evtSource.addEventListener('project.update', () => fetchProject());
+      evtSource.addEventListener('run.step', () => fetchProject());
+      return () => evtSource.close();
+    }
+  }, [fetchProject, project?.id]);
+
+  return { project, run };
+}
+
+export function useApprovals() {
+  const [approvals, setApprovals] = useState<any[]>([]);
+
+  const fetchApprovals = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/approvals`);
+      if (res.ok) {
+        const data = await res.json();
+        setApprovals(data.map((a: any) => ({
+          ...a,
+          projectName: a.project?.name,
+          projectSlug: a.project?.slug,
+        })));
+      }
+    } catch (err) {
+      console.error('Failed to fetch approvals', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchApprovals();
+    
+    const evtSource = new EventSource(`${API_BASE}/events`);
+    evtSource.addEventListener('approval.new', () => fetchApprovals());
+    evtSource.addEventListener('approval.resolved', () => fetchApprovals());
+    
+    return () => evtSource.close();
+  }, [fetchApprovals]);
+
+  const pending = approvals.filter((a) => a.status === 'pending');
+
+  async function approve(id: string) {
+    try {
+      await fetch(`${API_BASE}/approvals/${id}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'approved' }),
+      });
+      fetchApprovals();
+    } catch (err) {
+      console.error('Failed to approve', err);
+    }
+  }
+
+  async function reject(id: string) {
+    try {
+      await fetch(`${API_BASE}/approvals/${id}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'rejected' }),
+      });
+      fetchApprovals();
+    } catch (err) {
+      console.error('Failed to reject', err);
+    }
+  }
+
+  return { approvals, pending, approve, reject };
+}
+
+export function usePendingCount() {
+  const { pending } = useApprovals();
+  return pending.length;
+}
+
+export function useWorkspaceFiles(projectId: string) {
+  const [files, setFiles] = useState<Array<{ path: string; size: number; isDir: boolean }>>([]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    fetch(`${API_BASE}/projects/${projectId}/files`)
+      .then((res) => res.ok ? res.json() : { files: [] })
+      .then((data) => setFiles(data.files || []))
+      .catch(() => setFiles([]));
+  }, [projectId]);
+
+  return { files };
+}
+
+export function useWorkspaceInfo(projectId: string) {
+  const [workspace, setWorkspace] = useState<any>(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    fetch(`${API_BASE}/projects/${projectId}/workspace`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => setWorkspace(data))
+      .catch(() => setWorkspace(null));
+  }, [projectId]);
+
+  return { workspace };
+}
+
+export function usePreviewStatus(projectId: string) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewRunning, setPreviewRunning] = useState(false);
+
+  const checkStatus = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const res = await fetch(`${API_BASE}/projects/${projectId}/preview/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewRunning(data.running);
+        if (data.running && data.url) setPreviewUrl(data.url);
+      }
+    } catch {}
+  }, [projectId]);
+
+  useEffect(() => {
+    checkStatus();
+  }, [checkStatus]);
+
+  const startPreview = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const res = await fetch(`${API_BASE}/projects/${projectId}/preview/start`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok) {
+          setPreviewUrl(data.url);
+          setPreviewRunning(true);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to start preview', err);
+    }
+  }, [projectId]);
+
+  return { previewUrl, previewRunning, startPreview };
+}

@@ -1,0 +1,21 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "build": "bun build ./src/index.ts --target=bun --outfile=dist/index.js"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "@brickops/contracts": "workspace:*",
+    "@brickops/db": "workspace:*",
+    "@brickops/events": "workspace:*",
+    "@brickops/notifications": "workspace:*",
+    "@brickops/orchestrator": "workspace:*",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

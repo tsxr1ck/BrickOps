@@ -1,0 +1,11 @@
+{
+  "name": "@brickops/execution",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@brickops/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@brickops/ui",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "react": "^19.0.0",
+    "lucide-react": "^0.300.0"
+  },
+  "peerDependencies": {
+    "react-router-dom": "^7.0.0"
+  }
+}

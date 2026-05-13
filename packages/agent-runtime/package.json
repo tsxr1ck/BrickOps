@@ -1,0 +1,14 @@
+{
+  "name": "@brickops/agent-runtime",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@brickops/contracts": "workspace:*",
+    "@brickops/agent-policy": "workspace:*",
+    "@brickops/code-nav": "workspace:*",
+    "openai": "^4.0.0"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}

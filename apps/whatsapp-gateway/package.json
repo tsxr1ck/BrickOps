@@ -1,0 +1,20 @@
+{
+  "name": "whatsapp-gateway",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "capture-jid": "bun run src/capture-jid.ts"
+  },
+  "dependencies": {
+    "@brickops/agent-runtime": "workspace:*",
+    "@brickops/agent-policy": "workspace:*",
+    "@brickops/contracts": "workspace:*",
+    "@brickops/db": "workspace:*",
+    "@brickops/events": "workspace:*",
+    "@brickops/notifications": "workspace:*",
+    "@hapi/boom": "^10.0.0",
+    "@whiskeysockets/baileys": "^6.0.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
