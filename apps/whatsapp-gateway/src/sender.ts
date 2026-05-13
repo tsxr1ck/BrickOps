@@ -103,3 +103,32 @@ export async function sendDocument(
     return false;
   }
 }
+
+/**
+ * Send an image (PNG screenshot) via WhatsApp.
+ */
+export async function sendImage(
+  jid: string,
+  buffer: Buffer,
+  caption?: string
+): Promise<boolean> {
+  const sock = getSocket();
+  if (!sock) {
+    console.error('[whatsapp:sender] No active socket — image dropped');
+    return false;
+  }
+
+  try {
+    await waitForRateLimit();
+    await sock.sendMessage(jid, {
+      image: buffer,
+      caption: caption || '',
+      mimetype: 'image/png',
+    });
+    console.log(`[whatsapp:sender] → ${jid.split('@')[0]}: [image] ${caption?.slice(0, 50) || ''}`);
+    return true;
+  } catch (err) {
+    console.error('[whatsapp:sender] Failed to send image:', err);
+    return false;
+  }
+}

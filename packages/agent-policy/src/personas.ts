@@ -1,115 +1,56 @@
-import fs from 'fs';
-import path from 'path';
 import type { AgentRole } from '@brickops/contracts';
+import compiledPersonas from './compiled-personas.json';
 
 /**
- * Persona registry backed by real agency-agents markdown files.
+ * Persona registry backed by compiled agency-agents markdown.
+ *
  * Source: https://github.com/msitarzewski/agency-agents
+ * Build: `bun run build` in packages/agent-policy
  *
- * Each persona is loaded from its .md file in the personas/ directory.
- * The markdown content IS the system prompt — we send the full persona
- * definition to the model so it gets the identity, mission, rules,
- * workflow, deliverable templates, and communication style.
+ * The raw markdown files live in src/raw-personas/. The compiler
+ * (scripts/compile-personas.ts) strips frontmatter, boilerplate,
+ * and token-heavy template blocks, then writes compiled-personas.json.
  *
- * The blueprint says: "use persona modules, not a giant imported universe."
- * So we only operationalize the roles that map to our pipeline stages.
+ * This module provides O(1) lookups with zero disk I/O at runtime.
+ * The system prompt bytes are identical across every invocation,
+ * which is a hard requirement for OpenAI/Anthropic prompt caching.
  */
 
 export interface Persona {
   role: AgentRole;
   name: string;
   description: string;
-  /** The full agency-agents markdown — this IS the system prompt. */
+  /** The compiled system prompt — token-optimized from agency-agents markdown. */
   systemPrompt: string;
 }
 
-/**
- * Maps our pipeline roles to their agency-agents persona files.
- * Only the roles that align with the BrickOps orchestrator pipeline.
- */
-const ROLE_FILE_MAP: Record<AgentRole, string | null> = {
-  'router': null, // Router is BrickOps-native, no agency-agents persona
-  'planner': 'product-manager.md',
-  'software-architect': 'software-architect.md',
-  'frontend-developer': 'frontend-developer.md',
-  'backend-architect': 'backend-architect.md',
-  'ai-engineer': 'ai-engineer.md',
-  'code-reviewer': 'code-reviewer.md',
-  'reality-checker': 'reality-checker.md',
-  'minimal-change-engineer': 'senior-developer.md', // Senior Dev as the surgical patch specialist
-  'scaffold-agent': 'senior-developer.md', // Senior Dev for scaffolding new projects
-  'project-shepherd': 'project-shepherd.md',
-};
+/** Typed accessor for the compiled JSON data. */
+const personas = compiledPersonas as Record<
+  string,
+  { name: string; description: string; systemPrompt: string }
+>;
 
-/**
- * Inline system prompt for the Router role — the only BrickOps-native persona.
- * This one doesn't come from agency-agents because routing is pipeline-specific.
- */
-const ROUTER_SYSTEM_PROMPT = `You are the BrickOps Router. Your job is to classify incoming requests and route them to the right specialist agent.
+export function getPersona(role: AgentRole): Persona {
+  const data = personas[role];
 
-For each request, you must output a JSON object with:
-- "taskType": one of "intent-parse", "plan-classify", "status-summary", "architecture-plan", "code-edit", "code-scaffold", "code-review", "reality-check", "whatsapp-response"
-- "requiredRoles": array of agent roles needed (e.g. ["frontend-developer", "code-reviewer"])
-- "riskLevel": "low", "medium", "high", or "critical"
-- "reasoning": one sentence explaining your classification
-
-Be precise. Never over-classify risk. Default to "low" unless the request touches auth, secrets, deployments, or destructive operations.`;
-
-const PERSONAS_DIR = path.join(import.meta.dir, '..', 'personas');
-
-/** Cache loaded personas so we only read from disk once. */
-const cache = new Map<AgentRole, Persona>();
-
-function loadPersonaFile(filename: string): string {
-  const filePath = path.join(PERSONAS_DIR, filename);
-  return fs.readFileSync(filePath, 'utf-8');
-}
-
-function buildPersona(role: AgentRole): Persona {
-  const file = ROLE_FILE_MAP[role];
-
-  if (role === 'router' || file === null) {
-    return {
-      role,
-      name: 'Router',
-      description: 'Classifies request type, risk level, and selects the right specialist.',
-      systemPrompt: ROUTER_SYSTEM_PROMPT,
-    };
-  }
-
-  const content = loadPersonaFile(file);
-
-  // Extract name and description from the YAML frontmatter
-  const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-  let name = role;
-  let description = '';
-
-  if (frontmatterMatch) {
-    const fm = frontmatterMatch[1];
-    const nameMatch = fm.match(/^name:\s*(.+)$/m);
-    const descMatch = fm.match(/^description:\s*(.+)$/m);
-    if (nameMatch) name = nameMatch[1].trim();
-    if (descMatch) description = descMatch[1].trim();
+  if (!data) {
+    throw new Error(
+      `Persona not compiled for role: "${role}". ` +
+        `Available: ${Object.keys(personas).join(', ')}. ` +
+        `Run \`bun run build\` in packages/agent-policy to recompile.`
+    );
   }
 
   return {
     role,
-    name,
-    description,
-    systemPrompt: content,
+    name: data.name,
+    description: data.description,
+    systemPrompt: data.systemPrompt,
   };
 }
 
-export function getPersona(role: AgentRole): Persona {
-  if (!cache.has(role)) {
-    cache.set(role, buildPersona(role));
-  }
-  return cache.get(role)!;
-}
-
 export function getAllPersonas(): Persona[] {
-  const roles = Object.keys(ROLE_FILE_MAP) as AgentRole[];
-  return roles.map((role) => getPersona(role));
+  return (Object.keys(personas) as AgentRole[]).map((role) => getPersona(role));
 }
 
 export function getPersonaSystemPrompt(role: AgentRole): string {

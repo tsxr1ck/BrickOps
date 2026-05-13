@@ -8,9 +8,102 @@ import { runBuild } from "./stages/build";
 
 const GATEWAY_URL = process.env.BRICKOPS_GATEWAY_URL || "http://localhost:3002";
 
+async function sendWhatsApp(recipientJid: string, message: string): Promise<void> {
+  if (!recipientJid) return;
+  try {
+    await fetch(`${GATEWAY_URL}/outbound`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipientJid, message }),
+    });
+  } catch (err) {
+    console.error("[pipeline] WhatsApp send failed:", err);
+  }
+}
+
+async function sendWhatsAppImage(recipientJid: string, buffer: Buffer, caption?: string): Promise<void> {
+  if (!recipientJid) return;
+  try {
+    await fetch(`${GATEWAY_URL}/outbound-image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipientJid, buffer: Array.from(buffer), caption }),
+    });
+  } catch (err) {
+    console.error("[pipeline] WhatsApp image send failed:", err);
+  }
+}
+
+async function captureAndSendScreenshot(projectId: string, runId: string): Promise<void> {
+  const operatorJid = process.env.BRICKOPS_OPERATOR_JID;
+  if (!operatorJid) return;
+
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { name: true, slug: true },
+    });
+    if (!project) return;
+
+    const API_URL = `http://localhost:${process.env.PORT || 3001}`;
+
+    // Start preview if not running
+    let previewUrl: string | null = null;
+    try {
+      const statusRes = await fetch(`${API_URL}/projects/${projectId}/preview/status`);
+      if (statusRes.ok) {
+        const status = await statusRes.json();
+        if (status.running) previewUrl = status.url;
+      }
+    } catch {}
+
+    if (!previewUrl) {
+      try {
+        const startRes = await fetch(`${API_URL}/projects/${projectId}/preview/start`, { method: 'POST' });
+        if (startRes.ok) {
+          const data = await startRes.json();
+          previewUrl = data.url;
+        }
+      } catch {}
+    }
+
+    if (!previewUrl) {
+      console.warn('[pipeline] Could not start preview for screenshot');
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // Use the API screenshot endpoint (handles Puppeteer directly)
+    const ssRes = await fetch(`${API_URL}/projects/${projectId}/screenshot`, { method: 'POST' });
+    if (!ssRes.ok) {
+      console.warn('[pipeline] Screenshot API failed:', ssRes.status);
+      return;
+    }
+
+    const screenshotBuffer = Buffer.from(await ssRes.arrayBuffer());
+    if (screenshotBuffer.length < 1000) return; // Too small, probably placeholder
+
+    // Send via WhatsApp gateway (base64-encoded for JSON safety)
+    await fetch(`${GATEWAY_URL}/outbound-image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipientJid: operatorJid,
+        base64: screenshotBuffer.toString('base64'),
+        caption: `📸 ${project.name} — Preview`,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    console.log(`[pipeline] Screenshot sent to WhatsApp for ${project.name}`);
+  } catch (err: any) {
+    console.error('[pipeline] Screenshot flow failed:', err.message);
+  }
+}
+
 async function setStatus(projectId: string, status: ProjectStatus): Promise<void> {
   await prisma.project.update({ where: { id: projectId }, data: { status } });
-}
 }
 
 /**
@@ -24,21 +117,6 @@ async function setStatus(projectId: string, status: ProjectStatus): Promise<void
  * - runPipeline() handles intake and pauses if questions exist
  * - continuePipeline() resumes after clarification answers are received
  */
-
-const sm = new StateMachine();
-
-async function safeTrans(projectId: string, toState: ProjectStatus, reason?: string): Promise<void> {
-  try {
-    await setStatus(projectId, toState, reason);
-  } catch (err: any) {
-    if (err.message.includes('Invalid transition')) {
-      console.warn(`[pipeline] Forcing ${toState}: ${err.message}`);
-      await prisma.project.update({ where: { id: projectId }, data: { status: toState } });
-    } else {
-      throw err;
-    }
-  }
-}
 
 export interface PipelineContext {
   projectId: string;
@@ -318,6 +396,10 @@ async function continueFromCoding(ctx: PipelineContext): Promise<void> {
   await setStatus(projectId, "ready_to_deploy");
 
   await prisma.run.update({ where: { id: runId }, data: { currentStage: "ready_to_deploy", finishedAt: new Date() } });
+  
+  // Capture screenshot and send via WhatsApp
+  await captureAndSendScreenshot(projectId, runId);
+  
   console.log(`[pipeline] Edit run completed for project ${projectId}`);
 }
 
@@ -452,6 +534,8 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
     where: { id: runId },
     data: { currentStage: "ready_to_deploy", finishedAt: new Date() },
   });
+
+  await captureAndSendScreenshot(projectId, runId);
 
   console.log(`[pipeline] Pipeline completed for project ${projectId}`);
 }

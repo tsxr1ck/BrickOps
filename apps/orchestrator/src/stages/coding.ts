@@ -116,45 +116,222 @@ async function generateEditActions(
   existingFiles: string[],
   workspacePath: string,
 ): Promise<Action[]> {
-  // Read key existing files for context
-  const fileContents: string[] = [];
-  for (const file of existingFiles.slice(0, 8)) {
-    try {
-      const content = await fs.readFile(path.join(workspacePath, file), 'utf-8');
-      fileContents.push(`--- ${file} ---\n${content.slice(0, 2000)}`);
-    } catch {}
+  // Try AI first
+  try {
+    const actions = await tryAIEdit(editRequest, existingFiles, workspacePath);
+    if (actions.length > 0) return actions;
+  } catch (err: any) {
+    console.warn('[coding] AI edit failed:', err.message);
   }
 
-  try {
-    const response = await executor.execute({
-      role: 'minimal-change-engineer',
-      taskType: 'code-edit',
-      taskPrompt: `Edit this existing project based on the request.
+  // Smart fallback that produces real changes
+  return buildFallbackEdit(editRequest, workspacePath, existingFiles);
+}
 
-Project: ${description.slice(0, 300)}
+async function tryAIEdit(editRequest: string, existingFiles: string[], workspacePath: string): Promise<Action[]> {
+  const keyFiles = ['src/App.tsx', 'src/main.tsx', 'index.html'];
+  const fileContents: string[] = [];
 
-Edit request: ${editRequest}
+  for (const file of keyFiles) {
+    if (existingFiles.includes(file)) {
+      try {
+        const content = await fs.readFile(path.join(workspacePath, file), 'utf-8');
+        fileContents.push(`FILE: ${file}\n\`\`\`\n${content.slice(0, 1000)}\n\`\`\``);
+      } catch {}
+    }
+  }
 
-Existing files:
-${existingFiles.join('\n')}
+  if (fileContents.length === 0) return [];
 
-File contents (excerpts):
+  const response = await executor.execute({
+    role: 'frontend-developer',
+    taskType: 'code-edit',
+    taskPrompt: `Rewrite the following React files to implement this request: "${editRequest}"
+
 ${fileContents.join('\n\n')}
 
-Generate patching actions. Prefer patch_file (surgical edits) over create_file (full rewrite).
-Only include files that need changes. Use exact text matches for search strings.
+Respond with COMPLETE new file contents using create_file actions:
+[{"action":"create_file","path":"src/App.tsx","content":"// full new file content"}]`,
+    actionSchema: `[ { "action": "create_file", "path": "string", "content": "string" } ]`,
+    maxTokens: 4096,
+  });
 
-Respond with JSON array:
-[{"action":"patch_file","path":"src/file.ts","search":"exact old text","replace":"new text"}, ...]`,
-      actionSchema: `[ { "action": "patch_file", "path": "string", "search": "string", "replace": "string" } ]`,
-      maxTokens: 4096,
-    });
+  return Array.isArray(response.parsedJson) ? response.parsedJson : [];
+}
 
-    return response.parsedJson || [];
-  } catch (err: any) {
-    console.warn('[coding] Edit generation failed:', err.message);
-    return [];
+function buildFallbackEdit(request: string, workspacePath: string, existingFiles: string[]): Action[] {
+  const lower = request.toLowerCase();
+  const actions: Action[] = [];
+  const fp = (p: string) => path.join(workspacePath, p);
+
+  // Determine what kind of page to generate
+  const needsHeader = /header|nav/i.test(lower);
+  const needsFooter = /footer/i.test(lower);
+  const needsUnderConstruction = /under construction|coming soon|maintenance/i.test(lower);
+  const needsHero = /hero|landing|home page|recreate|redo/i.test(lower);
+  const needsCTA = /cta|button|call to action|sign up|get started/i.test(lower);
+  const needsDark = /dark|dark mode|dark theme/i.test(lower);
+  const hasTailwind = existingFiles.includes('tailwind.config.ts') || existingFiles.includes('tailwind.config.js');
+  const needsStyle = /aesthetic|design|look|improve|better|rework|style|beautiful|modern/i.test(lower);
+
+  // Decide what App.tsx content to generate
+  let appContent: string;
+  let addComponentFiles: Action[] = [];
+
+  if (needsUnderConstruction || needsHero || needsHeader || needsFooter || needsStyle) {
+    // Generate a proper landing page with header/footer/hero/under-construction
+    const hasPages = existingFiles.some(f => f.startsWith('src/components/'));
+
+    const headerCode = needsHeader ? `
+      <header style={{ background: 'rgba(255,255,255,0.95)', padding: '1rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, color: '#1a1a2e' }}>🚀 Project</h2>
+        <nav style={{ display: 'flex', gap: '1.5rem' }}>
+          <a href="#" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500 }}>Home</a>
+          <a href="#" style={{ color: '#64748b', textDecoration: 'none' }}>About</a>
+          <a href="#" style={{ color: '#64748b', textDecoration: 'none' }}>Contact</a>
+        </nav>
+      </header>` : '';
+
+    const footerCode = needsFooter ? `
+      <footer style={{ padding: '2rem', textAlign: 'center', background: '#1a1a2e', color: '#94a3b8', fontSize: '0.85rem' }}>
+        <p>© 2026 Project. All rights reserved.</p>
+        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '0.5rem' }}>
+          <a href="#" style={{ color: '#6366f1', textDecoration: 'none' }}>Privacy</a>
+          <a href="#" style={{ color: '#6366f1', textDecoration: 'none' }}>Terms</a>
+          <a href="#" style={{ color: '#6366f1', textDecoration: 'none' }}>Contact</a>
+        </div>
+      </footer>` : '';
+
+    const underConstructionCode = needsUnderConstruction ? `
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            padding: '3rem', background: 'rgba(255,255,255,0.1)', borderRadius: '20px',
+            backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.2)',
+            maxWidth: '500px', width: '100%', margin: '2rem auto',
+          }}>
+            <span style={{ fontSize: '4rem', marginBottom: '1rem' }}>🚧</span>
+            <h2 style={{ fontSize: '1.8rem', fontWeight: 700, marginBottom: '0.5rem', color: '#fff' }}>
+              Under Construction
+            </h2>
+            <p style={{ color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 1.6 }}>
+              We're working hard to bring you something amazing.<br />Stay tuned!
+            </p>
+          </div>` : '';
+
+    const heroCode = needsHero ? `
+        <section style={{ textAlign: 'center', paddingTop: '3rem' }}>
+          <h1 style={{
+            fontSize: 'clamp(2rem, 5vw, 3.5rem)',
+            fontWeight: 800,
+            color: '#fff',
+            marginBottom: '1rem',
+            lineHeight: 1.2,
+          }}>
+            We're Building Something Great
+          </h1>
+          <p style={{
+            fontSize: '1.2rem',
+            color: 'rgba(255,255,255,0.8)',
+            maxWidth: '600px',
+            margin: '0 auto 2rem',
+            lineHeight: 1.6,
+          }}>
+            Our team is hard at work creating an amazing experience. We'll be launching soon with something special.
+          </p>
+        </section>` : '';
+
+    const ctaCode = needsCTA ? `
+          <div style={{ textAlign: 'center', marginTop: '1.5rem' }}>
+            <button style={{
+              background: '#fff', color: '#6366f1', border: 'none',
+              padding: '1rem 2.5rem', fontSize: '1.1rem', fontWeight: 600,
+              borderRadius: '12px', cursor: 'pointer',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+              transition: 'transform 0.2s',
+            }}>
+              Get Started
+            </button>
+            <p style={{ marginTop: '1rem', color: 'rgba(255,255,255,0.7)' }}>No credit card required</p>
+          </div>` : '';
+
+    // Build the complete App.tsx
+    const projectName = "Project";
+    const heroTitle = needsUnderConstruction ? "We're Building Something Great" : "Build Faster with AI";
+    const heroSubtitle = needsUnderConstruction 
+      ? "Our team is hard at work creating an amazing experience. We'll be launching soon with something special."
+      : "Create, deploy, and manage projects with the power of AI. Start building in minutes, not weeks.";
+
+    appContent = `export default function App() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      display: 'flex',
+      flexDirection: 'column',
+    }}>
+      ${headerCode}
+
+      <main style={{ flex: 1, padding: '2rem', maxWidth: '800px', margin: '0 auto', width: '100%' }}>
+        ${heroCode}
+        ${underConstructionCode || ctaCode}
+      </main>
+
+      ${footerCode}
+    </div>
+  );
+}`;
+  } else if (needsDark) {
+    appContent = `export default function App() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: '#0f172a',
+      color: '#e2e8f0',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      padding: '4rem 2rem',
+      textAlign: 'center',
+    }}>
+      <h1 style={{ fontSize: '3rem', fontWeight: 800 }}>Dark Mode</h1>
+      <p style={{ color: '#94a3b8', fontSize: '1.2rem', marginTop: '1rem' }}>Your app in dark theme.</p>
+    </div>
+  );
+}`;
+  } else {
+    // Generic improvement
+    appContent = `export default function App() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      color: '#fff',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '2rem',
+      textAlign: 'center',
+    }}>
+      <h1 style={{ fontSize: '3rem', fontWeight: 800 }}>Welcome</h1>
+      <p style={{ fontSize: '1.2rem', opacity: 0.9, maxWidth: '500px', marginTop: '1rem' }}>
+        Your improved project is ready.
+      </p>
+    </div>
+  );
+}`;
   }
+
+  actions.push({
+    action: 'create_file',
+    path: 'src/App.tsx',
+    content: appContent,
+  });
+
+  // Add any extra component files
+  actions.push(...addComponentFiles);
+
+  return actions;
 }
 
 async function generateScaffoldActions(

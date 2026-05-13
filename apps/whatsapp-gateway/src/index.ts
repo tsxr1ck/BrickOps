@@ -94,6 +94,20 @@ Bun.serve({
       return new Response(JSON.stringify({ ok: sent }), { headers: { 'Content-Type': 'application/json' } });
     }
 
+    if (url.pathname === '/outbound-image' && req.method === 'POST') {
+      const { sendImage } = await import('./sender');
+      const body = await req.json<{ recipientJid: string; base64: string; caption?: string }>();
+      if (!body.recipientJid || !body.base64) {
+        return new Response(JSON.stringify({ ok: false, error: 'Missing required fields' }), { status: 400 });
+      }
+      const sent = await sendImage(
+        body.recipientJid,
+        Buffer.from(body.base64, 'base64'),
+        body.caption
+      );
+      return new Response(JSON.stringify({ ok: sent }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
     if (url.pathname === '/clarification/start' && req.method === 'POST') {
       const { startClarification } = await import('./conversation-state');
       const body = await req.json<{
