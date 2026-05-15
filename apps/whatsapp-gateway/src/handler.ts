@@ -6,6 +6,9 @@ import {
   getActiveConversation,
   recordAnswer,
   clearConversation,
+  selectProject,
+  getSelectedProject,
+  clearSelectedProject,
 } from './conversation-state';
 
 /**
@@ -109,9 +112,11 @@ export async function handleIntent(
       console.log('[whatsapp:handler] List projects requested');
 
       try {
+        const selected = getSelectedProject(senderJid);
         const projects = await apiFetch<any[]>('/projects');
         const message = templates.projectList(
-          projects.map((p) => ({ name: p.name, status: p.status }))
+          projects.map((p) => ({ name: p.name, status: p.status, slug: p.slug })),
+          selected?.projectSlug
         );
         await sendReply(senderJid, message, messageId);
       } catch (err: any) {
@@ -122,10 +127,11 @@ export async function handleIntent(
     }
 
     case 'project_status': {
-      console.log(`[whatsapp:handler] Status query: ${intent.projectQuery}`);
+      const query = intent.projectQuery || getSelectedProject(senderJid)?.projectSlug || '';
+      console.log(`[whatsapp:handler] Status query: ${query}`);
 
       try {
-        const project = await apiFetch(`/projects/${encodeURIComponent(intent.projectQuery)}`);
+        const project = await apiFetch(`/projects/${encodeURIComponent(query)}`);
         const message = templates.statusSummary(
           { name: project.name, slug: project.slug, status: project.status },
           project.runs?.[0]?.steps?.find((s: any) => s.status === 'active')?.name
@@ -133,7 +139,7 @@ export async function handleIntent(
         await sendReply(senderJid, message, messageId);
       } catch (err: any) {
         if (err.message.includes('404')) {
-          await sendReply(senderJid, `🔍 Project "${intent.projectQuery}" not found.`, messageId);
+          await sendReply(senderJid, `🔍 Project "${query}" not found.`, messageId);
         } else {
           await sendReply(senderJid, `❌ Failed to get status: ${err.message}`, messageId);
         }
@@ -142,7 +148,7 @@ export async function handleIntent(
     }
 
     case 'approve': {
-      const target = intent.projectQuery || 'latest';
+      const target = intent.projectQuery || getSelectedProject(senderJid)?.projectSlug || 'latest';
       console.log(`[whatsapp:handler] Approve: ${target}`);
 
       try {
@@ -166,7 +172,7 @@ export async function handleIntent(
     }
 
     case 'reject': {
-      const target = intent.projectQuery || 'latest';
+      const target = intent.projectQuery || getSelectedProject(senderJid)?.projectSlug || 'latest';
       console.log(`[whatsapp:handler] Reject: ${target}`);
 
       try {
@@ -202,13 +208,23 @@ export async function handleIntent(
       console.log(`[whatsapp:handler] Info request: ${intent.query}`);
 
       try {
+        const selected = getSelectedProject(senderJid);
         const projects = await apiFetch<any[]>('/projects');
-        if (projects.length === 0) {
+
+        // Use selected project if set, otherwise first project
+        let project: any = null;
+        if (selected) {
+          project = projects.find((p: any) => p.id === selected.projectId || p.slug === selected.projectSlug);
+        }
+        if (!project) {
+          project = projects[0];
+        }
+
+        if (!project) {
           await sendReply(senderJid, 'ℹ️ No projects found.', messageId);
           break;
         }
 
-        const project = projects[0];
         const message = templates.statusSummary(
           { name: project.name, slug: project.slug, status: project.status },
           undefined
@@ -220,51 +236,124 @@ export async function handleIntent(
       break;
     }
 
+    case 'unknown':
     case 'chat': {
-      console.log(`[whatsapp:handler] Chat: ${intent.message}`);
+      const messageText = intent.type === 'chat' ? intent.message : intent.rawText;
+      console.log(`[whatsapp:handler] ${intent.type === 'chat' ? 'Chat' : 'Unknown'}: ${messageText}`);
       
-      // If there's only one project and the message sounds like a modification, treat as modify
+      // If there's a selected project or only one project and the message sounds like a modification, treat as modify
       try {
+        const selected = getSelectedProject(senderJid);
         const projects = await apiFetch<any[]>('/projects');
-        const lower = intent.message.toLowerCase();
-        const isModifyIntent = /rework|update|fix|change|modify|improve|redesign|add|remove|delete/.test(lower);
+        const lower = messageText.toLowerCase();
+        const isModifyIntent = /rework|update|fix|change|modify|improve|redesign|edit|add|remove|delete|redo|create/.test(lower);
         
-        if (projects.length === 1 && isModifyIntent) {
-          const project = projects[0];
-          await apiFetch(`/projects/${project.id}/threads`, {
-            method: 'POST',
-            body: JSON.stringify({ role: 'user', content: intent.message }),
-          });
-          await apiFetch(`/projects/${project.id}/trigger`, { method: 'POST' });
+        // Use selected project if available, otherwise only auto-modify when exactly one project
+        if (isModifyIntent) {
+          let project: any = null;
+          if (selected) {
+            project = projects.find((p: any) => p.id === selected.projectId || p.slug === selected.projectSlug);
+          } else if (projects.length === 1) {
+            project = projects[0];
+          }
           
-          await sendReply(
-            senderJid,
-            `✏️ *Modifying ${project.name}*\n\nWorking on your request: ${intent.message.slice(0, 100)}\n\nI'll notify you when the build is done.`,
-            messageId
-          );
-          break;
+          if (project) {
+            await apiFetch(`/projects/${project.id}/threads`, {
+              method: 'POST',
+              body: JSON.stringify({ role: 'user', content: messageText }),
+            });
+            await apiFetch(`/projects/${project.id}/trigger`, { method: 'POST' });
+            
+            await sendReply(
+              senderJid,
+              `✏️ *Modifying ${project.name}*\n\nWorking on your request: ${messageText.slice(0, 100)}\n\nI'll notify you when the build is done.`,
+              messageId
+            );
+            break;
+          }
         }
       } catch {}
       
-      const reply = await generateChatReply(intent.message, senderJid);
+      const reply = await generateChatReply(messageText, senderJid);
       await sendReply(senderJid, reply, messageId);
       break;
     }
 
-    case 'modify_project': {
-      console.log(`[whatsapp:handler] Modify project: ${intent.projectQuery} — ${intent.request}`);
+    case 'select_project': {
+      console.log(`[whatsapp:handler] Select project: ${intent.projectQuery}`);
 
       try {
-        // Find the project by slug/name
         const projects = await apiFetch<any[]>('/projects');
-        const project = projects.find(
-          (p: any) =>
-            p.slug?.includes(intent.projectQuery.toLowerCase()) ||
-            p.name?.toLowerCase().includes(intent.projectQuery.toLowerCase())
-        );
+        let project: any = null;
+
+        // Try numeric index first (e.g. "select 1")
+        const numMatch = intent.projectQuery.trim().match(/^(\d+)$/);
+        if (numMatch) {
+          const index = parseInt(numMatch[1], 10) - 1;
+          project = projects[index] || null;
+        }
+
+        // Fall back to name/slug match
+        if (!project) {
+          project = projects.find(
+            (p: any) =>
+              p.slug?.toLowerCase() === intent.projectQuery.toLowerCase() ||
+              p.name?.toLowerCase() === intent.projectQuery.toLowerCase() ||
+              p.slug?.toLowerCase().includes(intent.projectQuery.toLowerCase()) ||
+              p.name?.toLowerCase().includes(intent.projectQuery.toLowerCase())
+          );
+        }
 
         if (!project) {
-          await sendReply(senderJid, `🔍 Could not find project "${intent.projectQuery}". Check the name with "list projects".`, messageId);
+          // List available projects for reference
+          const names = projects.map((p: any) => `"${p.name}"`).join(', ') || 'none';
+          await sendReply(senderJid, `🔍 Could not find project "${intent.projectQuery}". Available: ${names}`, messageId);
+          break;
+        }
+
+        selectProject(senderJid, project.id, project.slug, project.name);
+        await sendReply(
+          senderJid,
+          templates.projectSelected({ name: project.name, slug: project.slug, status: project.status }),
+          messageId
+        );
+      } catch (err: any) {
+        await sendReply(senderJid, `❌ Failed to select project: ${err.message}`, messageId);
+      }
+      break;
+    }
+
+    case 'deselect_project': {
+      console.log('[whatsapp:handler] Deselect project');
+      clearSelectedProject(senderJid);
+      await sendReply(senderJid, templates.projectDeselected(), messageId);
+      break;
+    }
+
+    case 'modify_project': {
+      const selected = getSelectedProject(senderJid);
+      const query = intent.projectQuery || selected?.projectSlug || '';
+      console.log(`[whatsapp:handler] Modify project: ${query} — ${intent.request}`);
+
+      try {
+        // Find the project by slug/name or use selected
+        const projects = await apiFetch<any[]>('/projects');
+        let project: any = null;
+
+        if (query) {
+          project = projects.find(
+            (p: any) =>
+              p.slug?.toLowerCase().includes(query.toLowerCase()) ||
+              p.name?.toLowerCase().includes(query.toLowerCase())
+          );
+        }
+
+        if (!project) {
+          if (selected) {
+            await sendReply(senderJid, `🔍 Could not find project "${query}". Your selected project (${selected.projectName}) may have been deleted. Try "list projects".`, messageId);
+          } else {
+            await sendReply(senderJid, `🔍 Could not find project "${query}". Check the name with "list projects" or use "select [project]" to set a default.`, messageId);
+          }
           break;
         }
 
@@ -285,13 +374,6 @@ export async function handleIntent(
       } catch (err: any) {
         await sendReply(senderJid, `❌ Failed to process modification: ${err.message}`, messageId);
       }
-      break;
-    }
-
-    case 'unknown': {
-      console.log(`[whatsapp:handler] Unknown: ${intent.rawText}`);
-      const reply = await generateChatReply(intent.rawText, senderJid);
-      await sendReply(senderJid, reply, messageId);
       break;
     }
   }
@@ -396,13 +478,18 @@ async function generateChatReply(message: string, senderJid: string): Promise<st
   // Gather context about current projects for a smarter reply
   let projectContext = '';
   try {
+    const selected = getSelectedProject(senderJid);
     const projects = await apiFetch<any[]>('/projects');
     if (projects.length > 0) {
       const summary = projects
         .slice(0, 5)
         .map((p) => `- ${p.name} (${p.status})`)
         .join('\n');
-      projectContext = `\nCurrent projects:\n${summary}`;
+      let ctx = `\nCurrent projects:\n${summary}`;
+      if (selected) {
+        ctx += `\n\nSelected project: ${selected.projectName} (${selected.projectSlug}) — commands without a specific project target this one.`;
+      }
+      projectContext = ctx;
     }
   } catch {}
 

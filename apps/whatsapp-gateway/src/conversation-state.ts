@@ -130,3 +130,63 @@ export function getAllActiveConversations(): Map<string, ConversationContext> {
   }
   return new Map(activeConversations);
 }
+
+// --- Project selection state ---
+
+export interface ProjectSelection {
+  projectId: string;
+  projectSlug: string;
+  projectName: string;
+  selectedAt: number;
+}
+
+const SELECTION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+/** operatorJid → selected project */
+const selectedProjects = new Map<string, ProjectSelection>();
+
+/**
+ * Set the operator's selected project.
+ */
+export function selectProject(
+  operatorJid: string,
+  projectId: string,
+  projectSlug: string,
+  projectName: string
+): void {
+  selectedProjects.set(operatorJid, {
+    projectId,
+    projectSlug,
+    projectName,
+    selectedAt: Date.now(),
+  });
+  console.log(
+    `[conversation] Project selected: ${projectSlug} → ${operatorJid.split('@')[0]}`
+  );
+}
+
+/**
+ * Get the operator's currently selected project, if any.
+ * Returns null if no selection or if timed out.
+ */
+export function getSelectedProject(operatorJid: string): ProjectSelection | null {
+  const sel = selectedProjects.get(operatorJid);
+  if (!sel) return null;
+
+  if (Date.now() - sel.selectedAt > SELECTION_TIMEOUT_MS) {
+    selectedProjects.delete(operatorJid);
+    return null;
+  }
+
+  return sel;
+}
+
+/**
+ * Clear the operator's selected project.
+ */
+export function clearSelectedProject(operatorJid: string): void {
+  selectedProjects.delete(operatorJid);
+  console.log(
+    `[conversation] Project deselected → ${operatorJid.split('@')[0]}`
+  );
+}

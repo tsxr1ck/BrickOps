@@ -1,31 +1,63 @@
 import type { PipelineContext } from '../pipeline';
 import { prisma } from '@brickops/db';
+import { CommandRunner } from '@brickops/execution';
+
+export interface ValidationResult {
+  pass: boolean;
+  summary: string;
+  issues: string[];
+  compilerErrors?: string;
+}
 
 /**
- * Validation stage (Reality Checker).
+ * Validation stage (Compiler-as-Critic).
  *
- * Runs semantic validation on the generated code to catch:
- * - Missing imports
- * - Placeholder content
- * - Broken routes
- * - Inconsistent dependencies
+ * Runs actual compiler checks against generated code:
+ * 1. tsc --noEmit (TypeScript type checking)
+ * 2. Mechanical checks (package.json, entry point, tsconfig)
  *
- * Uses the reality-checker persona when AI is available.
- * Falls back to mechanical checks otherwise.
+ * Returns structured errors so the pipeline can feed them
+ * back to the coding agent for auto-fix retries.
  */
-
-export async function runValidation(ctx: PipelineContext): Promise<void> {
+export async function runValidation(ctx: PipelineContext): Promise<ValidationResult> {
   console.log(`[validate] Running validation for project ${ctx.projectId}`);
 
   if (!ctx.workspacePath) {
     throw new Error('No workspace path for validation');
   }
 
-  const issues: string[] = [];
-
-  // Mechanical validation — check basic structural integrity
   const fs = await import('fs/promises');
   const path = await import('path');
+  const issues: string[] = [];
+  let compilerErrors: string | undefined;
+
+  // --- Compiler check: tsc --noEmit ---
+  const tsconfigPath = path.join(ctx.workspacePath, 'tsconfig.json');
+  try {
+    await fs.stat(tsconfigPath);
+
+    const runner = new CommandRunner(ctx.workspacePath);
+    try {
+      const { stdout, stderr } = await runner.run('tsc --noEmit');
+      if (stderr.trim()) {
+        compilerErrors = stderr;
+        issues.push('TypeScript compilation failed');
+      }
+      if (stdout.trim()) {
+        compilerErrors = (compilerErrors || '') + '\n' + stdout;
+      }
+      if (!stderr.trim() && !stdout.trim()) {
+        console.log('[validate] TypeScript compilation passed');
+      }
+    } catch (err: any) {
+      compilerErrors = err.message;
+      issues.push('TypeScript compilation failed');
+    }
+  } catch {
+    issues.push('tsconfig.json not found — skipping type checking');
+  }
+
+  // --- Mechanical checks ---
 
   // Check package.json exists
   try {
@@ -46,22 +78,14 @@ export async function runValidation(ctx: PipelineContext): Promise<void> {
     issues.push('src/index.ts entry point not found');
   }
 
-  // Check tsconfig exists
-  try {
-    await fs.stat(path.join(ctx.workspacePath, 'tsconfig.json'));
-  } catch {
-    issues.push('tsconfig.json not found');
-  }
+  const pass = compilerErrors ? false : issues.length === 0;
+  const summary = pass
+    ? 'All checks passed'
+    : `${issues.length} issue(s) found`;
+
+  const result: ValidationResult = { pass, summary, issues, compilerErrors };
 
   // Store validation result
-  const result = {
-    pass: issues.length === 0,
-    summary: issues.length === 0
-      ? 'All mechanical checks passed'
-      : `${issues.length} issue(s) found`,
-    issues,
-  };
-
   await prisma.projectThread.create({
     data: {
       projectId: ctx.projectId,
@@ -70,11 +94,13 @@ export async function runValidation(ctx: PipelineContext): Promise<void> {
     },
   });
 
-  if (!result.pass) {
+  if (!pass) {
     console.warn(`[validate] Validation failed: ${result.issues.join(', ')}`);
-    // Don't throw — let the pipeline continue but log warnings
-    // A strict mode would throw here to block the build
+    if (compilerErrors) {
+      console.warn(`[validate] Compiler errors:\n${compilerErrors.slice(0, 500)}`);
+    }
   }
 
-  console.log(`[validate] Validation ${result.pass ? 'passed ✓' : 'has warnings ⚠'}`);
+  console.log(`[validate] Validation ${pass ? 'passed' : 'failed'}`);
+  return result;
 }

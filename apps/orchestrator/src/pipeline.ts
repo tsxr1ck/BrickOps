@@ -2,7 +2,7 @@ import { prisma } from "@brickops/db";
 import type { ProjectStatus } from "@brickops/contracts";
 import { runIntake } from "./stages/intake";
 import { runPlanning } from "./stages/planning";
-import { runCoding } from "./stages/coding";
+import { runCoding, runParallelCoding } from "./stages/coding";
 import { runValidation } from "./stages/validate";
 import { runBuild } from "./stages/build";
 
@@ -41,7 +41,7 @@ async function captureAndSendScreenshot(projectId: string, runId: string): Promi
   try {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { name: true, slug: true },
+      select: { name: true, slug: true, source: true },
     });
     if (!project) return;
 
@@ -75,7 +75,15 @@ async function captureAndSendScreenshot(projectId: string, runId: string): Promi
     await new Promise((r) => setTimeout(r, 1500));
 
     // Use the API screenshot endpoint (handles Puppeteer directly)
-    const ssRes = await fetch(`${API_URL}/projects/${projectId}/screenshot`, { method: 'POST' });
+    const isWhatsApp = project.source === 'whatsapp';
+    const ssOptions = isWhatsApp ? { width: 390, height: 844 } : undefined;
+    
+    const ssRes = await fetch(`${API_URL}/projects/${projectId}/screenshot`, { 
+      method: 'POST',
+      headers: ssOptions ? { 'Content-Type': 'application/json' } : undefined,
+      body: ssOptions ? JSON.stringify(ssOptions) : undefined
+    });
+    
     if (!ssRes.ok) {
       console.warn('[pipeline] Screenshot API failed:', ssRes.status);
       return;
@@ -364,11 +372,34 @@ async function continueFromCoding(ctx: PipelineContext): Promise<void> {
   }
   await completeStep(codeStepId);
 
-  // ---- Review ----
-  await setStatus(projectId, "reviewing");
-  const reviewStepId = await createStep(runId, "Code review");
-  await runValidation(ctx);
-  await completeStep(reviewStepId);
+  // ---- Compiler-as-Critic retry loop (max 3 attempts) ----
+  const MAX_RETRIES = 3;
+  let validationPassed = false;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    await setStatus(projectId, "reviewing");
+    const reviewStepId = await createStep(runId, `Code review ${attempt > 0 ? `(retry ${attempt})` : ''}`);
+    const result = await runValidation(ctx);
+    await completeStep(reviewStepId);
+
+    if (result.pass) {
+      validationPassed = true;
+      break;
+    }
+
+    if (result.compilerErrors && attempt < MAX_RETRIES - 1) {
+      console.log(`[pipeline] Compiler errors found — retry ${attempt + 1}/${MAX_RETRIES}`);
+      const fixStepId = await createStep(runId, `Fix errors (retry ${attempt + 1})`);
+      await runCoding(ctx, result.compilerErrors);
+      await completeStep(fixStepId);
+    } else {
+      break;
+    }
+  }
+
+  if (!validationPassed) {
+    console.warn('[pipeline] Validation did not pass after retries — continuing to build');
+  }
 
   // ---- Install + Build ----
   await setStatus(projectId, "installing");
@@ -482,18 +513,68 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
   const indexStepId = await createStep(runId, "Workspace indexing");
   await completeStep(indexStepId);
 
-  // ---- Stage 6: Coding ----
+  // ---- Stage 6: Coding (Parallel or Sequential) ----
   await setStatus(projectId, "routing_task");
   await setStatus(projectId, "coding");
-  const codeStepId = await createStep(runId, "Code generation");
-  await runCoding(ctx);
-  await completeStep(codeStepId);
 
-  // ---- Stage 7: Review ----
-  await setStatus(projectId, "reviewing");
-  const reviewStepId = await createStep(runId, "Code review");
-  await runValidation(ctx);
-  await completeStep(reviewStepId);
+  // Check if PM produced parallel tasks
+  const parallelTasksThread = await prisma.projectThread.findFirst({
+    where: {
+      projectId,
+      role: "system",
+      content: { contains: '"parallelTasks"' },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  let usedParallel = false;
+  if (parallelTasksThread) {
+    try {
+      const data = JSON.parse(parallelTasksThread.content);
+      if (data.parallelTasks && Array.isArray(data.parallelTasks) && data.parallelTasks.length > 0) {
+        console.log(`[pipeline] Using parallel coding with ${data.parallelTasks.length} agents`);
+        const codeStepId = await createStep(runId, `Code generation (${data.parallelTasks.length} parallel agents)`);
+        await runParallelCoding(ctx, data.parallelTasks);
+        await completeStep(codeStepId);
+        usedParallel = true;
+      }
+    } catch {}
+  }
+
+  if (!usedParallel) {
+    const codeStepId = await createStep(runId, "Code generation");
+    await runCoding(ctx);
+    await completeStep(codeStepId);
+  }
+
+  // ---- Compiler-as-Critic retry loop (max 3 attempts) ----
+  const MAX_RETRIES = 3;
+  let validationPassed = false;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    await setStatus(projectId, "reviewing");
+    const reviewStepId = await createStep(runId, `Code review ${attempt > 0 ? `(retry ${attempt})` : ''}`);
+    const result = await runValidation(ctx);
+    await completeStep(reviewStepId);
+
+    if (result.pass) {
+      validationPassed = true;
+      break;
+    }
+
+    if (result.compilerErrors && attempt < MAX_RETRIES - 1) {
+      console.log(`[pipeline] Compiler errors found — retry ${attempt + 1}/${MAX_RETRIES}`);
+      const fixStepId = await createStep(runId, `Fix errors (retry ${attempt + 1})`);
+      await runCoding(ctx, result.compilerErrors);
+      await completeStep(fixStepId);
+    } else {
+      break;
+    }
+  }
+
+  if (!validationPassed) {
+    console.warn('[pipeline] Validation did not pass after retries — continuing to build');
+  }
 
   // ---- Stage 8: Install + Build ----
   await setStatus(projectId, "installing");

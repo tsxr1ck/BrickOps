@@ -1,4 +1,5 @@
 import type { WhatsAppIntent } from '@brickops/contracts';
+import { parseIntent as regexParseIntent } from './parser';
 
 /**
  * LLM-based intent parser.
@@ -16,12 +17,14 @@ const INTENT_PROMPT = `You are a WhatsApp message classifier for BrickOps, an AI
 Intent types:
 - "create_project": wants to build/start/create something new. Field: description (the project idea)
 - "list_projects": wants to see/list projects. No fields
+- "select_project": wants to select/switch to/focus on a specific project. Field: projectQuery (the project name or slug)
+- "deselect_project": wants to deselect/clear/unset the current project. No fields
 - "project_status": wants status/info about a specific project. Field: projectQuery
 - "approve": wants to approve something. Field: projectQuery (optional)
 - "reject": wants to reject/cancel. Fields: projectQuery (optional), reason (optional)
 - "info_request": wants info (files changed, build status, blockers). Fields: query, projectQuery (optional)
 - "clarification_answer": answering a follow-up question about a project. Field: answer (their response text)
-- "modify_project": wants to change/update/fix/improve/rework an existing project. Fields: projectQuery, request
+- "modify_project": wants to change/update/fix/improve/rework/redo an existing project. Fields: projectQuery, request
 - "chat": greeting, casual talk, asking how things work, or anything that doesn't fit above. Field: message
 - "unknown": only if truly unparseable. Field: rawText
 
@@ -29,7 +32,14 @@ Examples:
 "start project for a todo app" → {"type":"create_project","description":"a todo app"}
 "build me a landing page" → {"type":"create_project","description":"a landing page"}
 "list projects" → {"type":"list_projects"}
+"select my app" → {"type":"select_project","projectQuery":"my app"}
+"switch to landing page" → {"type":"select_project","projectQuery":"landing page"}
+"focus on todo project" → {"type":"select_project","projectQuery":"todo project"}
+"deselect" → {"type":"deselect_project"}
+"clear project" → {"type":"deselect_project"}
+"unset project" → {"type":"deselect_project"}
 "status of my app" → {"type":"project_status","projectQuery":"my app"}
+"status" → {"type":"project_status","projectQuery":""}
 "approve" → {"type":"approve"}
 "React with TypeScript" → {"type":"clarification_answer","answer":"React with TypeScript"}
 "what files changed" → {"type":"info_request","query":"what files changed"}
@@ -39,9 +49,12 @@ Examples:
 "fix the header on my project" → {"type":"modify_project","projectQuery":"my project","request":"fix the header"}
 "change the color scheme" → {"type":"modify_project","projectQuery":"","request":"change the color scheme"}
 "improve the design" → {"type":"modify_project","projectQuery":"","request":"improve the design"}
+"redo the whole home page" → {"type":"modify_project","projectQuery":"","request":"redo the whole home page"}
 
 Key rules:
-- If the user mentions rework/update/fix/change/modify/improve/redesign an existing thing → modify_project
+- "select", "switch to", "focus on", "work on" + project name → select_project
+- "deselect", "clear", "unset", "unfocus" → deselect_project
+- If the user mentions rework/update/fix/change/modify/improve/redesign/edit/redo/rebuild an existing thing → modify_project
 - If the user mentions build/create/start/make something NEW → create_project
 - For modify_project, try to extract projectQuery from the message. If not clear, leave empty
 "how does this work" → {"type":"chat","message":"how does this work"}
@@ -80,14 +93,14 @@ export async function parseIntent(text: string): Promise<WhatsAppIntent> {
     if (!response.ok) {
       const errBody = await response.text();
       console.error(`[llm-parser] API error ${response.status}: ${errBody}`);
-      return { type: 'chat', message: trimmed };
+      return regexParseIntent(text);
     }
 
     const data = await response.json() as any;
     const content = data.choices?.[0]?.message?.content || '';
 
     if (!content.trim()) {
-      return { type: 'chat', message: trimmed };
+      return regexParseIntent(text);
     }
 
     // Parse JSON from response (strip markdown fences if present)
@@ -104,14 +117,14 @@ export async function parseIntent(text: string): Promise<WhatsAppIntent> {
         parsed = repairJson(cleaned);
       } catch {
         console.error('[llm-parser] Could not parse, raw:', content.slice(0, 200));
-        return { type: 'chat', message: trimmed };
+        return regexParseIntent(text);
       }
     }
 
     return normalizeIntent(parsed, trimmed);
   } catch (err: any) {
     console.error('[llm-parser] Failed:', err.message);
-    return { type: 'chat', message: trimmed };
+    return regexParseIntent(text);
   }
 }
 
@@ -161,6 +174,10 @@ function normalizeIntent(raw: any, originalText: string): WhatsAppIntent {
       return { type: 'info_request', query: raw.query || originalText, projectQuery: raw.projectQuery || undefined };
     case 'modify_project':
       return { type: 'modify_project', projectQuery: raw.projectQuery || '', request: raw.request || originalText };
+    case 'select_project':
+      return { type: 'select_project', projectQuery: raw.projectQuery || originalText };
+    case 'deselect_project':
+      return { type: 'deselect_project' };
     case 'clarification_answer':
       return { type: 'clarification_answer', answer: raw.answer || originalText, projectQuery: raw.projectQuery || undefined };
     case 'chat':

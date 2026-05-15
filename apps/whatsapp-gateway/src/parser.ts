@@ -54,6 +54,19 @@ const INFO_PATTERNS = [
   /^(?:what|show|tell\s+me)\s+(.+)/i,
 ];
 
+const MODIFY_PATTERNS = [
+  /^(?:rework|update|fix|change|modify|improve|redesign|edit|redo|rebuild|add|remove|delete)\s+(.+)/i,
+  /^(?:can\s+you\s+)?(?:rework|update|fix|change|modify|improve|redesign|edit|redo|rebuild)\s+(.+)/i,
+];
+
+const SELECT_PATTERNS = [
+  /^(?:select|switch\s+to|focus\s+on|work\s+on)\s+(.+)/i,
+];
+
+const DESELECT_PATTERNS = [
+  /^(?:deselect|clear|unset|unfocus)(?:\s+project)?$/i,
+];
+
 export function parseIntent(text: string): WhatsAppIntent {
   const trimmed = text.trim();
 
@@ -116,6 +129,33 @@ export function parseIntent(text: string): WhatsAppIntent {
         query: trimmed,
         projectQuery: undefined,
       };
+    }
+  }
+
+  // --- Modify Project ---
+  for (const pattern of MODIFY_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      return {
+        type: 'modify_project',
+        projectQuery: '', // Cannot easily extract without LLM, leave empty
+        request: match[1]?.trim() || trimmed,
+      };
+    }
+  }
+
+  // --- Select Project ---
+  for (const pattern of SELECT_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      return { type: 'select_project', projectQuery: match[1].trim() };
+    }
+  }
+
+  // --- Deselect Project ---
+  for (const pattern of DESELECT_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return { type: 'deselect_project' };
     }
   }
 

@@ -15,6 +15,32 @@ export interface ProjectInfo {
 const WEB_BASE = process.env.BRICKOPS_WEB_URL || 'http://localhost:5173';
 
 /**
+ * Project selected confirmation.
+ */
+export function projectSelected(project: ProjectInfo): string {
+  return [
+    `📌 *Project Selected*`,
+    `Now focused on: ${project.name}`,
+    `Status: ${project.status}`,
+    '',
+    `All commands now target this project by default.`,
+    `Reply "deselect" to clear.`,
+    `${WEB_BASE}/projects/${project.slug}`,
+  ].join('\n');
+}
+
+/**
+ * Project deselected confirmation.
+ */
+export function projectDeselected(): string {
+  return [
+    `📌 *Selection Cleared*`,
+    `No project is currently selected.`,
+    `Specify a project name in your commands, or reply "select [project]" to set one.`,
+  ].join('\n');
+}
+
+/**
  * Plan needs approval.
  */
 export function planApproval(
@@ -121,13 +147,14 @@ export function approvalResolved(
  * Project list response.
  */
 export function projectList(
-  projects: Array<{ name: string; status: string }>
+  projects: Array<{ name: string; status: string; slug?: string }>,
+  selectedSlug?: string
 ): string {
   if (projects.length === 0) {
     return '📂 No projects found.';
   }
   const lines = projects.map(
-    (p, i) => `${i + 1}. *${p.name}* — ${p.status}`
+    (p, i) => `${i + 1}. *${p.name}* — ${p.status}${p.slug && p.slug === selectedSlug ? ' 📌' : ''}`
   );
   return [`📂 *Your Projects* (${projects.length})`, '', ...lines].join('\n');
 }

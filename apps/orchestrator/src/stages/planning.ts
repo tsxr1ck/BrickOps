@@ -17,16 +17,27 @@ async function sendWhatsApp(recipientJid: string, message: string): Promise<void
 }
 
 /**
- * Planning stage.
+ * Planning stage — Project Manager.
  *
- * Generates an implementation plan from the project description
- * and classification. Uses the software-architect persona.
+ * Generates an implementation plan AND decomposes the work into
+ * isolated parallel tasks. Each task targets non-overlapping files
+ * so multiple coding agents can execute simultaneously.
  *
- * After generating the plan, emits plan.generated so the
- * notification dispatcher can send it via WhatsApp.
+ * Output stored in a system thread as JSON for the coding stage to consume.
  */
 
-export async function runPlanning(ctx: PipelineContext): Promise<void> {
+export interface ParallelTask {
+  agentRole: string;
+  filesToEdit: string[];
+  specificInstructions: string;
+}
+
+export interface ProjectPlan {
+  projectPlan: string;
+  parallelTasks: ParallelTask[];
+}
+
+export async function runPlanning(ctx: PipelineContext): Promise<ProjectPlan | null> {
   console.log(`[planning] Generating plan for project ${ctx.projectId}`);
 
   // Get the description and classification
@@ -48,7 +59,7 @@ export async function runPlanning(ctx: PipelineContext): Promise<void> {
   // Collect any clarification answers for enriched context
   const clarificationAnswers = threads
     .filter((t) => t.role === 'user')
-    .slice(1) // Skip the initial description
+    .slice(1)
     .map((t) => t.content)
     .join('\n');
 
@@ -56,41 +67,68 @@ export async function runPlanning(ctx: PipelineContext): Promise<void> {
     ? `${description}\n\nAdditional details:\n${clarificationAnswers}`
     : description;
 
-  // Generate plan with AI
   let plan: string;
+  let projectPlan: ProjectPlan | null = null;
 
   try {
     const response = await executor.execute({
       role: 'software-architect',
       taskType: 'architecture-plan',
-      taskPrompt: `Create a detailed implementation plan for this project.
+      taskPrompt: `You are the Project Manager. Create a detailed implementation plan AND decompose the work into isolated parallel tasks.
 
-Type: ${classification.type}
+Project Type: ${classification.type}
 Roles: ${classification.roles.join(', ')}
 
 Description:
 ${enrichedDescription}
 
-The plan should include:
-1. Architecture overview
-2. Tech stack choices (specific versions)
-3. Project structure (key files and directories)
-4. Data model (if applicable)
-5. Routes/pages/endpoints
-6. Key milestones (numbered, actionable)
-7. Dependencies to install
-8. Build and run instructions
+First write a project plan. Then, at the end, output a JSON block called "parallelTasks" that divides the work into independent tickets. Each ticket must target DIFFERENT files — no two tasks may edit the same file.
 
-Be specific and actionable. This plan will be used to generate code.`,
+## Project Plan
+- Architecture overview
+- Tech stack (specific versions)
+- Project structure (key files and directories)
+- Data model (if applicable)
+- Routes/pages/endpoints
+- Milestones
+
+## Parallel Tasks JSON (REQUIRED)
+Output this JSON block at the END of your response:
+
+\`\`\`json
+{
+  "parallelTasks": [
+    {
+      "agentRole": "frontend-developer",
+      "filesToEdit": ["src/components/Login.tsx", "src/App.tsx"],
+      "specificInstructions": "Build the Login UI component. Import it into App.tsx. Do not modify any backend files."
+    },
+    {
+      "agentRole": "backend-architect",
+      "filesToEdit": ["src/api/auth.ts", "src/db/schema.prisma"],
+      "specificInstructions": "Create the auth API endpoint and database schema. Define function signatures the frontend will call."
+    }
+  ]
+}
+\`\`\`
+
+CRITICAL RULES:
+1. Each "filesToEdit" array must have UNIQUE files — NO file should appear in two tasks
+2. Define exact function signatures in specificInstructions so agents agree on contracts
+3. Max 4 parallel tasks
+4. If the project is simple (1-2 files), use a single task
+5. Use agent roles like: "frontend-developer", "backend-architect", "fullstack-developer", "ui-stylist"`,
     });
 
-    plan = response.content || generateStaticPlan(enrichedDescription, classification);
+    const content = response.content || '';
+    plan = content;
+    projectPlan = parseParallelTasks(content);
   } catch (err: any) {
     console.warn('[planning] AI planning failed, using static:', err.message);
     plan = generateStaticPlan(enrichedDescription, classification);
   }
 
-  // Store the plan as an assistant message
+  // Store the plan
   await prisma.projectThread.create({
     data: {
       projectId: ctx.projectId,
@@ -99,7 +137,22 @@ Be specific and actionable. This plan will be used to generate code.`,
     },
   });
 
-  // Send plan summary via WhatsApp directly
+  // Store the parallel tasks as a separate system thread for coding stage
+  if (projectPlan) {
+    await prisma.projectThread.create({
+      data: {
+        projectId: ctx.projectId,
+        role: 'system',
+        content: JSON.stringify({ stage: 'parallel_tasks', ...projectPlan }),
+      },
+    });
+    console.log(`[planning] Decomposed into ${projectPlan.parallelTasks.length} parallel tasks`);
+    for (const task of projectPlan.parallelTasks) {
+      console.log(`[planning]   - ${task.agentRole}: ${task.filesToEdit.join(', ')}`);
+    }
+  }
+
+  // Send plan summary via WhatsApp
   const operatorJid = process.env.BRICKOPS_OPERATOR_JID;
   if (operatorJid) {
     const project = await prisma.project.findUnique({
@@ -119,6 +172,42 @@ Be specific and actionable. This plan will be used to generate code.`,
   }
 
   console.log(`[planning] Plan generated (${plan.length} chars)`);
+  return projectPlan;
+}
+
+/**
+ * Parse the parallelTasks JSON from the LLM response.
+ * Handles both inline JSON blocks and markdown fenced blocks.
+ */
+function parseParallelTasks(content: string): ProjectPlan | null {
+  // Try to find { "parallelTasks": [...] } pattern
+  const jsonMatch = content.match(/\{\s*"parallelTasks"\s*:\s*\[[\s\S]*?\]\s*\}/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (parsed.parallelTasks && Array.isArray(parsed.parallelTasks) && parsed.parallelTasks.length > 0) {
+      // Validate no file overlaps
+      const allFiles = new Set<string>();
+      for (const task of parsed.parallelTasks) {
+        if (!task.filesToEdit || !Array.isArray(task.filesToEdit)) return null;
+        for (const file of task.filesToEdit) {
+          if (allFiles.has(file)) {
+            console.warn(`[planning] File overlap detected: ${file} — rejecting parallel plan`);
+            return null;
+          }
+          allFiles.add(file);
+        }
+      }
+      return {
+        projectPlan: content.split('```json')[0]?.trim() || content,
+        parallelTasks: parsed.parallelTasks,
+      };
+    }
+  } catch {
+    console.warn('[planning] Failed to parse parallel tasks JSON');
+  }
+  return null;
 }
 
 /**

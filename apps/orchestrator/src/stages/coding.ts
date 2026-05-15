@@ -1,16 +1,46 @@
 import type { PipelineContext } from '../pipeline';
 import { prisma } from '@brickops/db';
 import { FileSystemSandbox } from '@brickops/execution';
-import type { Action } from '@brickops/contracts';
+import type { Action, ParallelTask } from '@brickops/contracts';
 import { executor } from '../executor';
 import fs from 'fs/promises';
 import path from 'path';
 
 /**
+ * Concurrency limiter — prevents hitting API rate limits
+ * when spawning parallel agents.
+ */
+class ConcurrencyLimiter {
+  private running = 0;
+  private queue: Array<() => void> = [];
+
+  constructor(private maxConcurrent: number) {}
+
+  async acquire(): Promise<void> {
+    if (this.running < this.maxConcurrent) {
+      this.running++;
+      return;
+    }
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  release(): void {
+    this.running--;
+    const next = this.queue.shift();
+    if (next) {
+      this.running++;
+      next();
+    }
+  }
+}
+
+/**
  * Coding stage — handles both initial scaffold and re-entrant edits.
  */
 
-export async function runCoding(ctx: PipelineContext): Promise<void> {
+export async function runCoding(ctx: PipelineContext, compilerErrors?: string): Promise<void> {
   console.log(`[coding] Generating code for project ${ctx.projectId}`);
 
   if (!ctx.workspacePath) {
@@ -35,7 +65,10 @@ export async function runCoding(ctx: PipelineContext): Promise<void> {
 
   let actions: Action[];
 
-  if (isEdit) {
+  if (compilerErrors) {
+    console.log(`[coding] Fix-errors mode — compiler reported errors`);
+    actions = await generateFixActions(description, compilerErrors, existingFiles, ctx.workspacePath);
+  } else if (isEdit) {
     console.log(`[coding] Edit mode — ${existingFiles.length} existing files`);
     const editRequest = getLatestEditRequest(threads);
     actions = await generateEditActions(description, editRequest, existingFiles, ctx.workspacePath);
@@ -88,6 +121,137 @@ export async function runCoding(ctx: PipelineContext): Promise<void> {
   console.log(`[coding] Executed ${executed}/${actions.length} actions`);
 }
 
+/**
+ * Parallel coding — spawns an agent for each independent task from the PM.
+ *
+ * Each agent receives ONLY its assigned files as context.
+ * All agents run concurrently with a concurrency limiter
+ * to avoid API rate limits (max 2 simultaneous LLM calls).
+ */
+export async function runParallelCoding(
+  ctx: PipelineContext,
+  tasks: ParallelTask[]
+): Promise<void> {
+  console.log(`[coding] Spawning ${tasks.length} parallel agents...`);
+
+  if (!ctx.workspacePath) {
+    throw new Error('No workspace path — provisioning must run first');
+  }
+
+  const limiter = new ConcurrencyLimiter(2);
+  const sandbox = new FileSystemSandbox(ctx.workspacePath);
+
+  const agentPromises = tasks.map(async (task, index) => {
+    await limiter.acquire();
+
+    try {
+      console.log(`[coding] Agent ${index + 1}/${tasks.length}: ${task.agentRole} → ${task.filesToEdit.join(', ')}`);
+
+      // Read ONLY the files assigned to this task
+      const fileContents: string[] = [];
+      for (const filePath of task.filesToEdit) {
+        try {
+          const fullPath = path.join(ctx.workspacePath!, filePath);
+          const content = await fs.readFile(fullPath, 'utf-8');
+          fileContents.push(`### ${filePath}\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``);
+        } catch {
+          // File doesn't exist yet — agent will create it
+          fileContents.push(`### ${filePath} (new file — does not exist yet)`);
+        }
+      }
+
+      const response = await executor.execute({
+        role: task.agentRole as any,
+        taskType: 'code-edit',
+        taskPrompt: `You are a ${task.agentRole} working on an isolated task. Your job: ${task.specificInstructions}
+
+## Your Assigned Files (ONLY edit these)
+${fileContents.join('\n\n')}
+
+## Instructions
+1. You may ONLY edit the files listed above
+2. Other agents are working on other files in parallel — do NOT touch files not assigned to you
+3. If another agent is building a function you need, assume the function signature specified in your instructions exists
+4. Use patch_file for targeted edits, create_file for new files
+5. Produce real, working code — no placeholders
+
+Respond with a JSON array of actions.`,
+        actionSchema: `[ { "action": "patch_file", "path": "string", "search": "string", "replace": "string" }, { "action": "create_file", "path": "string", "content": "string" } ]`,
+        maxTokens: 8192,
+      });
+
+      const actions: Action[] = Array.isArray(response.parsedJson) ? response.parsedJson : [];
+
+      // Apply each action to the workspace
+      let executed = 0;
+      for (const action of actions) {
+        try {
+          switch (action.action) {
+            case 'create_file':
+              await sandbox.createFile(action.path, action.content);
+              console.log(`[coding:${task.agentRole}] Created: ${action.path}`);
+              break;
+            case 'patch_file':
+              await sandbox.patchFile(action.path, action.search, action.replace);
+              console.log(`[coding:${task.agentRole}] Patched: ${action.path}`);
+              break;
+            case 'delete_file':
+              await sandbox.deleteFile(action.path);
+              console.log(`[coding:${task.agentRole}] Deleted: ${action.path}`);
+              break;
+            case 'run_command':
+              console.log(`[coding:${task.agentRole}] Command (skipped in parallel mode): ${action.command}`);
+              break;
+          }
+          executed++;
+        } catch (err: any) {
+          console.warn(`[coding:${task.agentRole}] Action failed for ${(action as any).path}: ${err.message}`);
+        }
+      }
+
+      console.log(`[coding] Agent ${index + 1} finished: ${executed}/${actions.length} actions`);
+      return { task, actions, executed };
+    } catch (err: any) {
+      console.error(`[coding] Agent ${index + 1} failed:`, err.message);
+      return { task, actions: [], executed: 0, error: err.message };
+    } finally {
+      limiter.release();
+    }
+  });
+
+  const results = await Promise.all(agentPromises);
+
+  const totalActions = results.reduce((sum, r) => sum + r.actions.length, 0);
+  const totalExecuted = results.reduce((sum, r) => sum + r.executed, 0);
+  const failures = results.filter((r) => 'error' in r);
+
+  console.log(`[coding] Parallel stage complete: ${totalExecuted}/${totalActions} actions across ${tasks.length} agents`);
+  if (failures.length > 0) {
+    console.warn(`[coding] ${failures.length} agent(s) failed: ${failures.map((f: any) => f.error).join('; ')}`);
+  }
+
+  // Store summary thread
+  await prisma.projectThread.create({
+    data: {
+      projectId: ctx.projectId,
+      role: 'system',
+      content: JSON.stringify({
+        stage: 'coding',
+        mode: 'parallel',
+        agents: tasks.length,
+        totalActions,
+        executed: totalExecuted,
+        failures: failures.length,
+        files: results.flatMap((r) =>
+          r.actions
+            .filter((a): a is Extract<Action, { action: 'create_file' }> => a.action === 'create_file')
+            .map((a) => (a as { action: 'create_file'; path: string }).path)
+        ),
+      }),
+    },
+  });
+}
+
 async function listWorkspaceFiles(workspacePath: string): Promise<string[]> {
   const files: string[] = [];
   async function walk(dir: string) {
@@ -116,19 +280,74 @@ async function generateEditActions(
   existingFiles: string[],
   workspacePath: string,
 ): Promise<Action[]> {
-  // Try AI first
-  try {
-    const actions = await tryAIEdit(editRequest, existingFiles, workspacePath);
-    if (actions.length > 0) return actions;
-  } catch (err: any) {
-    console.warn('[coding] AI edit failed:', err.message);
+  // Try AI edit with full context
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const actions = await tryAIEdit(editRequest, existingFiles, workspacePath, attempt);
+      if (actions.length > 0) return actions;
+      console.warn(`[coding] AI edit attempt ${attempt + 1} returned empty`);
+    } catch (err: any) {
+      console.warn(`[coding] AI edit attempt ${attempt + 1} failed:`, err.message);
+    }
   }
 
-  // Smart fallback that produces real changes
+  // Last resort: use AI scaffold to generate a complete rewrite with full context
+  try {
+    const actions = await tryAIScaffoldEdit(editRequest, existingFiles, workspacePath);
+    if (actions.length > 0) return actions;
+  } catch (err: any) {
+    console.warn('[coding] AI scaffold edit failed:', err.message);
+  }
+
+  // Absolute last resort: keyword-based fallback
   return buildFallbackEdit(editRequest, workspacePath, existingFiles);
 }
 
-async function tryAIEdit(editRequest: string, existingFiles: string[], workspacePath: string): Promise<Action[]> {
+async function tryAIScaffoldEdit(
+  editRequest: string,
+  existingFiles: string[],
+  workspacePath: string,
+): Promise<Action[]> {
+  // Read all source files for full context
+  const sourceFiles = existingFiles.filter((f) =>
+    /\.(tsx?|jsx?|css|html)$/.test(f) && !f.includes('node_modules')
+  );
+  const fileContents: string[] = [];
+
+  for (const file of sourceFiles.slice(0, 10)) {
+    try {
+      const content = await fs.readFile(path.join(workspacePath, file), 'utf-8');
+      const truncated = content.length > 1500 ? content.slice(0, 1500) + '\n// ... (truncated)' : content;
+      fileContents.push(`### ${file}\n\`\`\`\n${truncated}\n\`\`\``);
+    } catch {}
+  }
+
+  if (fileContents.length === 0) return [];
+
+  const response = await executor.execute({
+    role: 'frontend-developer',
+    taskType: 'code-scaffold',
+    taskPrompt: `You are rewriting an existing project. Here is the full current state:
+
+${fileContents.join('\n\n')}
+
+Rewrite the project to implement this request: "${editRequest}"
+
+Use patch_file for targeted changes where possible. Use create_file for new files or files that need complete rewrites.
+Respond with a JSON array of actions.`,
+    actionSchema: `[ { "action": "patch_file", "path": "string", "search": "string", "replace": "string" }, { "action": "create_file", "path": "string", "content": "string" } ]`,
+    maxTokens: 8192,
+  });
+
+  return Array.isArray(response.parsedJson) ? response.parsedJson : [];
+}
+
+async function tryAIEdit(
+  editRequest: string,
+  existingFiles: string[],
+  workspacePath: string,
+  _attempt: number = 0,
+): Promise<Action[]> {
   const keyFiles = ['src/App.tsx', 'src/main.tsx', 'index.html'];
   const fileContents: string[] = [];
 
@@ -143,16 +362,110 @@ async function tryAIEdit(editRequest: string, existingFiles: string[], workspace
 
   if (fileContents.length === 0) return [];
 
-  const response = await executor.execute({
-    role: 'frontend-developer',
+  // Phase 1: Figure out WHICH files need to be touched
+  const planResponse = await executor.execute({
+    role: 'software-architect',
     taskType: 'code-edit',
-    taskPrompt: `Rewrite the following React files to implement this request: "${editRequest}"
+    taskPrompt: `Analyze the user's edit request and the current code context. 
+Determine exactly which files need to be modified or created.
 
+Request: "${editRequest}"
+
+Context:
 ${fileContents.join('\n\n')}
 
-Respond with COMPLETE new file contents using create_file actions:
-[{"action":"create_file","path":"src/App.tsx","content":"// full new file content"}]`,
-    actionSchema: `[ { "action": "create_file", "path": "string", "content": "string" } ]`,
+Return a JSON array of specific file paths to edit or create.`,
+    actionSchema: `[ "string" ]`,
+    maxTokens: 1024,
+  });
+
+  const filesToEdit: string[] = Array.isArray(planResponse.parsedJson)
+    ? planResponse.parsedJson
+    : [];
+
+  const actions: Action[] = [];
+
+  // Phase 2: Loop through each file and apply the specific patch/edit
+  for (const file of filesToEdit) {
+    const fileContentStr = fileContents.find(fc => fc.startsWith(`FILE: ${file}`)) || 'New file';
+
+    try {
+      const fileResponse = await executor.execute({
+        role: 'frontend-developer',
+        taskType: 'code-edit',
+        taskPrompt: `Implement the requested edit for ONLY the following file: ${file}
+
+Request: "${editRequest}"
+
+Current File Context:
+${fileContentStr}
+
+Respond with the complete, updated file content.`,
+        actionSchema: `{ "content": "string" }`,
+        maxTokens: 4096,
+      });
+
+      if (fileResponse.parsedJson?.content) {
+        actions.push({ action: 'create_file', path: file, content: fileResponse.parsedJson.content });
+      }
+    } catch (err: any) {
+      console.warn(`[coding] Failed to edit file ${file}:`, err.message);
+    }
+  }
+
+  return actions;
+}
+
+async function generateFixActions(
+  description: string,
+  compilerErrors: string,
+  existingFiles: string[],
+  workspacePath: string,
+): Promise<Action[]> {
+  try {
+    const actions = await tryAIFix(compilerErrors, existingFiles, workspacePath);
+    if (actions.length > 0) return actions;
+  } catch (err: any) {
+    console.warn('[coding] AI fix failed:', err.message);
+  }
+  // Fallback: treat as a generic edit
+  return buildFallbackEdit('fix compilation errors', workspacePath, existingFiles);
+}
+
+async function tryAIFix(compilerErrors: string, existingFiles: string[], workspacePath: string): Promise<Action[]> {
+  const keyFiles = ['src/App.tsx', 'src/main.tsx', 'src/index.ts', 'index.html'];
+  const fileContents: string[] = [];
+
+  for (const file of keyFiles) {
+    if (existingFiles.includes(file)) {
+      try {
+        const content = await fs.readFile(path.join(workspacePath, file), 'utf-8');
+        fileContents.push(`FILE: ${file}\n\`\`\`\n${content.slice(0, 1500)}\n\`\`\``);
+      } catch {}
+    }
+  }
+
+  if (fileContents.length === 0) return [];
+
+  const errorSummary = compilerErrors.slice(0, 2000);
+
+  const response = await executor.execute({
+    role: 'minimal-change-engineer',
+    taskType: 'code-edit',
+    taskPrompt: `The generated code failed to compile with TypeScript errors. Fix ALL errors by patching the affected files.
+
+## Compiler Errors
+\`\`\`
+${errorSummary}
+\`\`\`
+
+## Current Files
+${fileContents.join('\n\n')}
+
+Use patch_file actions to make minimal, targeted fixes. Do NOT rewrite entire files.
+Respond with a JSON array of patch_file actions:
+[{"action":"patch_file","path":"src/App.tsx","search":"exact broken line","replace":"fixed line"}]`,
+    actionSchema: `[ { "action": "patch_file", "path": "string", "search": "string", "replace": "string" }, { "action": "create_file", "path": "string", "content": "string" } ]`,
     maxTokens: 4096,
   });
 
@@ -298,7 +611,9 @@ function buildFallbackEdit(request: string, workspacePath: string, existingFiles
   );
 }`;
   } else {
-    // Generic improvement
+    // Use request text itself — better than a generic "Welcome"
+    const cleanRequest = request.replace(/^edit\s+/i, '').replace(/^the\s+/i, '');
+    const title = cleanRequest.length > 60 ? cleanRequest.slice(0, 57) + '...' : cleanRequest;
     appContent = `export default function App() {
   return (
     <div style={{
@@ -313,9 +628,9 @@ function buildFallbackEdit(request: string, workspacePath: string, existingFiles
       padding: '2rem',
       textAlign: 'center',
     }}>
-      <h1 style={{ fontSize: '3rem', fontWeight: 800 }}>Welcome</h1>
-      <p style={{ fontSize: '1.2rem', opacity: 0.9, maxWidth: '500px', marginTop: '1rem' }}>
-        Your improved project is ready.
+      <h1 style={{ fontSize: '2.5rem', fontWeight: 800, maxWidth: '600px' }}>{${JSON.stringify(title)}}</h1>
+      <p style={{ fontSize: '1.1rem', opacity: 0.85, maxWidth: '500px', marginTop: '1.5rem' }}>
+        Edit applied successfully.
       </p>
     </div>
   );
@@ -340,10 +655,11 @@ async function generateScaffoldActions(
   classification: { type: string; roles: string[] },
 ): Promise<Action[]> {
   try {
-    const response = await executor.execute({
-      role: 'scaffold-agent',
-      taskType: 'code-scaffold',
-      taskPrompt: `Generate the complete file scaffold for this project based on the implementation plan.
+    console.log(`[coding] Delegating task breakdown to architect agent...`);
+    const breakdownResponse = await executor.execute({
+      role: 'software-architect',
+      taskType: 'code-planning',
+      taskPrompt: `Based on the implementation plan, provide a complete list of file paths that need to be generated for this project scaffold.
 
 Project Type: ${classification.type}
 Description: ${description}
@@ -351,22 +667,55 @@ Description: ${description}
 Implementation Plan:
 ${plan}
 
-Generate ALL files needed for a working project. Include:
-- package.json with correct dependencies
-- tsconfig.json
-- src/index.ts (entry point)
-- All source files mentioned in the plan
-- .gitignore
-- README.md
-
-Respond with JSON array: [{"action":"create_file","path":"rel/path","content":"full content"}, ...]
-Every file must have COMPLETE content. No placeholders. Use real working code.`,
-      actionSchema: `[ { "action": "create_file", "path": "string", "content": "string" } ]`,
-      maxTokens: 8192,
+Only respond with a JSON array of file paths. Do not include any code content.`,
+      actionSchema: `[ "string" ]`,
+      maxTokens: 1024,
     });
 
-    return response.parsedJson || getFallbackScaffold(description, classification.type);
-  } catch {
+    const filePaths: string[] = Array.isArray(breakdownResponse.parsedJson)
+      ? breakdownResponse.parsedJson
+      : ['package.json', 'tsconfig.json', 'src/index.ts', 'README.md', '.gitignore'];
+
+    console.log(`[coding] Subagent task breakdown yielded ${filePaths.length} files to create.`);
+
+    const actions: Action[] = [];
+
+    for (const filePath of filePaths) {
+      console.log(`[coding] Subagent generating content for: ${filePath}`);
+
+      try {
+        const fileResponse = await executor.execute({
+          role: 'frontend-developer',
+          taskType: 'code-scaffold',
+          taskPrompt: `You are generating a single file for a larger project.
+
+File Path to Generate: ${filePath}
+
+Project Plan Context:
+${plan}
+
+Write the COMPLETE, fully working code for exactly this file. Do not use placeholders.`,
+          actionSchema: `{ "content": "string" }`,
+          maxTokens: 4096,
+        });
+
+        if (fileResponse.parsedJson?.content) {
+          actions.push({
+            action: 'create_file',
+            path: filePath,
+            content: fileResponse.parsedJson.content,
+          });
+        }
+      } catch (fileErr: any) {
+        console.warn(`[coding] Subagent failed for ${filePath}: ${fileErr.message}`);
+      }
+    }
+
+    if (actions.length === 0) throw new Error('Subagent loop yielded no files');
+
+    return actions;
+  } catch (err) {
+    console.warn('[coding] Iterative scaffold failed, using fallback:', err);
     return getFallbackScaffold(description, classification.type);
   }
 }

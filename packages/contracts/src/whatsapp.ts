@@ -58,6 +58,15 @@ export const ModifyProjectIntent = z.object({
   request: z.string(),
 });
 
+export const SelectProjectIntent = z.object({
+  type: z.literal('select_project'),
+  projectQuery: z.string(),
+});
+
+export const DeselectProjectIntent = z.object({
+  type: z.literal('deselect_project'),
+});
+
 export const UnknownIntent = z.object({
   type: z.literal('unknown'),
   rawText: z.string(),
@@ -72,6 +81,8 @@ export const WhatsAppIntent = z.discriminatedUnion('type', [
   InfoRequestIntent,
   ClarificationAnswerIntent,
   ModifyProjectIntent,
+  SelectProjectIntent,
+  DeselectProjectIntent,
   ChatIntent,
   UnknownIntent,
 ]);

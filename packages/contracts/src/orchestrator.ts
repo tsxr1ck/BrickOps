@@ -91,6 +91,17 @@ export type ApprovalAction = z.infer<typeof ApprovalAction>;
 
 // --- SSE event types ---
 
+export interface ParallelTask {
+  agentRole: string;
+  filesToEdit: string[];
+  specificInstructions: string;
+}
+
+export interface ProjectPlan {
+  projectPlan: string;
+  parallelTasks: ParallelTask[];
+}
+
 export type SSEEventType =
   | 'run.step'
   | 'project.update'
