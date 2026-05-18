@@ -1,25 +1,38 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from 'react';
 
-type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
+type ButtonVariant = 'filled' | 'tonal' | 'outlined' | 'ghost';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 const variants: Record<ButtonVariant, CSSProperties> = {
-  primary: { background: 'var(--bo-accent)', color: '#fff' },
-  secondary: { background: 'var(--bo-bg-tertiary)', color: 'var(--bo-text-primary)', border: '1px solid var(--bo-border)' },
-  danger: { background: 'var(--bo-error-bg)', color: 'var(--bo-error)', border: '1px solid var(--bo-error)' },
-  ghost: { background: 'transparent', color: 'var(--bo-text-secondary)' },
+  filled: {
+    background: 'var(--bo-accent)',
+    color: 'var(--bo-text-inverse)',
+  },
+  tonal: {
+    background: 'var(--bo-accent-bg)',
+    color: 'var(--bo-accent)',
+  },
+  outlined: {
+    background: 'transparent',
+    color: 'var(--bo-accent)',
+    border: '1px solid var(--bo-accent)',
+  },
+  ghost: {
+    background: 'transparent',
+    color: 'var(--bo-text-secondary)',
+  },
 };
 
 const sizes: Record<ButtonSize, CSSProperties> = {
-  sm: { padding: '6px 14px', fontSize: 'var(--bo-text-sm)', minHeight: '36px' },
-  md: { padding: '10px 20px', fontSize: 'var(--bo-text-base)', minHeight: 'var(--bo-tap-target)' },
-  lg: { padding: '14px 28px', fontSize: 'var(--bo-text-lg)', minHeight: '56px' },
+  sm: { padding: '5px 14px', fontSize: 'var(--bo-text-sm)', minHeight: '32px', borderRadius: 'var(--bo-radius-sm)' },
+  md: { padding: '8px 20px', fontSize: 'var(--bo-text-sm)', minHeight: 'var(--bo-tap-target)', borderRadius: 'var(--bo-radius-md)' },
+  lg: { padding: '12px 28px', fontSize: 'var(--bo-text-base)', minHeight: '48px', borderRadius: 'var(--bo-radius-md)' },
 };
 
 const baseStyle: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-  borderRadius: 'var(--bo-radius-md)', fontWeight: 'var(--bo-weight-semibold)' as any,
-  transition: 'all var(--bo-transition-fast)', cursor: 'pointer', border: '1px solid transparent',
+  fontWeight: 'var(--bo-weight-medium)',
+  transition: 'all var(--bo-transition-fast)', cursor: 'pointer',
   whiteSpace: 'nowrap', userSelect: 'none', WebkitTapHighlightColor: 'transparent',
 };
 
@@ -32,19 +45,21 @@ interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'sty
   style?: CSSProperties;
 }
 
-export function Button({ variant = 'primary', size = 'md', icon, fullWidth, children, style, disabled, ...rest }: ButtonProps) {
+export function Button({
+  variant = 'filled', size = 'md', icon, fullWidth, children, style, disabled, ...rest
+}: ButtonProps) {
   return (
     <button
       style={{
         ...baseStyle, ...variants[variant], ...sizes[size],
         ...(fullWidth ? { width: '100%' } : {}),
-        ...(disabled ? { opacity: 0.5, pointerEvents: 'none' } : {}),
+        ...(disabled ? { opacity: 0.35, pointerEvents: 'none' } : {}),
         ...style,
       }}
       disabled={disabled}
       {...rest}
     >
-      {icon}
+      {icon && <span style={{ display: 'flex' }}>{icon}</span>}
       {children}
     </button>
   );

@@ -67,6 +67,7 @@ createSession({
 // --- HTTP server for outbound delivery and control ---
 Bun.serve({
   port: GATEWAY_PORT,
+  idleTimeout: 255,
   async fetch(req) {
     const url = new URL(req.url);
 

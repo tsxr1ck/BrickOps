@@ -6,15 +6,15 @@ import { useState, useEffect, useCallback, type CSSProperties } from 'react';
 const API_BASE = 'http://localhost:3001';
 
 const pageStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 'var(--bo-space-4)' };
-const titleStyle: CSSProperties = { fontSize: 'var(--bo-text-xl)', fontWeight: 'var(--bo-weight-bold)' as any, color: 'var(--bo-text-primary)', marginBottom: 'var(--bo-space-2)' };
-const sectionTitle: CSSProperties = { fontSize: 'var(--bo-text-base)', fontWeight: 'var(--bo-weight-semibold)' as any, color: 'var(--bo-text-primary)', marginBottom: 'var(--bo-space-3)' };
+const titleStyle: CSSProperties = { fontSize: 'var(--bo-text-xl)', fontWeight: 'var(--bo-weight-bold)' as any, color: 'var(--bo-text)', marginBottom: 'var(--bo-space-2)' };
+const sectionTitle: CSSProperties = { fontSize: 'var(--bo-text-base)', fontWeight: 'var(--bo-weight-semibold)' as any, color: 'var(--bo-text)', marginBottom: 'var(--bo-space-3)' };
 const row: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--bo-space-3)' };
 const label: CSSProperties = { fontSize: 'var(--bo-text-sm)', color: 'var(--bo-text-secondary)' };
-const mono: CSSProperties = { fontFamily: 'var(--bo-font-mono)', fontSize: 'var(--bo-text-sm)', color: 'var(--bo-text-primary)', background: 'var(--bo-bg-tertiary)', padding: '4px 10px', borderRadius: 'var(--bo-radius-sm)' };
+const mono: CSSProperties = { fontFamily: 'var(--bo-font-mono)', fontSize: 'var(--bo-text-sm)', color: 'var(--bo-text)', background: 'var(--bo-bg-surface)', padding: '4px 10px', borderRadius: 'var(--bo-radius-sm)' };
 const qrBox: CSSProperties = { width: '200px', height: '200px', margin: '0 auto', borderRadius: 'var(--bo-radius-md)', border: '2px dashed var(--bo-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--bo-text-tertiary)', fontSize: 'var(--bo-text-sm)', textAlign: 'center' };
 const qrBoxActive: CSSProperties = { ...qrBox, border: '1px solid var(--bo-border)', borderStyle: 'solid' };
 const themeGroup: CSSProperties = { display: 'flex', gap: 'var(--bo-space-2)' };
-const themeBtn = (active: boolean): CSSProperties => ({ display: 'flex', alignItems: 'center', gap: '6px', padding: 'var(--bo-space-2) var(--bo-space-3)', borderRadius: 'var(--bo-radius-sm)', border: active ? '1px solid var(--bo-accent)' : '1px solid var(--bo-border)', background: active ? 'var(--bo-accent-bg)' : 'var(--bo-bg-secondary)', color: active ? 'var(--bo-accent)' : 'var(--bo-text-secondary)', fontSize: 'var(--bo-text-sm)', cursor: 'pointer', minHeight: 'var(--bo-tap-target)' });
+const themeBtn = (active: boolean): CSSProperties => ({ display: 'flex', alignItems: 'center', gap: '6px', padding: 'var(--bo-space-2) var(--bo-space-3)', borderRadius: 'var(--bo-radius-sm)', border: active ? '1px solid var(--bo-accent)' : '1px solid var(--bo-border)', background: active ? 'var(--bo-accent-bg)' : 'var(--bo-bg-raised)', color: active ? 'var(--bo-accent)' : 'var(--bo-text-secondary)', fontSize: 'var(--bo-text-sm)', cursor: 'pointer', minHeight: 'var(--bo-tap-target)' });
 
 type ConnectionState = 'disconnected' | 'connecting' | 'open' | 'unknown';
 
@@ -100,7 +100,7 @@ export function SettingsPage() {
               <span style={mono}>{waStatus?.operatorJid ?? 'Not configured'}</span>
             </div>
             <Button
-              variant="secondary"
+              variant="tonal"
               size="sm"
               fullWidth
               onClick={handleReconnect}

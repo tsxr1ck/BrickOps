@@ -55,6 +55,13 @@ export class EventBus {
   }
 
   /**
+   * Remove a wildcard listener (added via onAny).
+   */
+  offAny(handler: (event: SystemEvent) => void): void {
+    this.emitter.off('*', handler);
+  }
+
+  /**
    * Remove a specific listener.
    */
   off<T extends SystemEventType>(

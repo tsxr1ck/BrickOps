@@ -39,6 +39,8 @@ export function useProjects() {
 export function useProject(slugOrId: string) {
   const [project, setProject] = useState<any | null>(null);
   const [run, setRun] = useState<any | null>(null);
+  const [threads, setThreads] = useState<any[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
 
   const fetchProject = useCallback(async () => {
     if (!slugOrId) return;
@@ -47,6 +49,8 @@ export function useProject(slugOrId: string) {
       if (res.ok) {
         const data = await res.json();
         setProject(mapProject(data));
+        setProjectId(data.id);
+        if (data.threads) setThreads(data.threads);
         if (data.runs && data.runs.length > 0) {
           setRun(data.runs[0]);
         }
@@ -58,16 +62,20 @@ export function useProject(slugOrId: string) {
 
   useEffect(() => {
     fetchProject();
+  }, [fetchProject]);
 
-    if (project?.id) {
-      const evtSource = new EventSource(`${API_BASE}/events/project/${project.id}`);
-      evtSource.addEventListener('project.update', () => fetchProject());
-      evtSource.addEventListener('run.step', () => fetchProject());
-      return () => evtSource.close();
-    }
-  }, [fetchProject, project?.id]);
+  // SSE subscription — separate effect so projectId is stable
+  useEffect(() => {
+    if (!projectId) return;
 
-  return { project, run };
+    const evtSource = new EventSource(`${API_BASE}/events/project/${projectId}`);
+    evtSource.addEventListener('project.update', () => fetchProject());
+    evtSource.addEventListener('run.step', () => fetchProject());
+
+    return () => evtSource.close();
+  }, [projectId, fetchProject]);
+
+  return { project, run, threads, fetchProject };
 }
 
 export function useApprovals() {
@@ -133,6 +141,16 @@ export function useApprovals() {
 export function usePendingCount() {
   const { pending } = useApprovals();
   return pending.length;
+}
+
+export async function sendModifyRequest(projectId: string, message: string) {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/modify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+  if (!res.ok) throw new Error('Failed to send modify request');
+  return res.json();
 }
 
 export function useWorkspaceFiles(projectId: string) {

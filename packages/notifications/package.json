@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "dependencies": {
     "@brickops/contracts": "workspace:*",
-    "@brickops/events": "workspace:*"
+    "@brickops/events": "workspace:*",
+    "jspdf": "^4.2.1"
   }
 }

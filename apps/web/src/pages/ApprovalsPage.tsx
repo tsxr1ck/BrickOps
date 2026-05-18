@@ -14,7 +14,7 @@ const pageStyle: CSSProperties = {
 const titleStyle: CSSProperties = {
   fontSize: 'var(--bo-text-xl)',
   fontWeight: 'var(--bo-weight-bold)' as any,
-  color: 'var(--bo-text-primary)',
+  color: 'var(--bo-text)',
   marginBottom: 'var(--bo-space-2)',
 };
 
@@ -34,7 +34,7 @@ const topRow: CSSProperties = {
 const approvalTitle: CSSProperties = {
   fontSize: 'var(--bo-text-base)',
   fontWeight: 'var(--bo-weight-semibold)' as any,
-  color: 'var(--bo-text-primary)',
+  color: 'var(--bo-text)',
 };
 
 const projectLabel: CSSProperties = {
@@ -58,7 +58,7 @@ const resolvedBanner: CSSProperties = {
   alignItems: 'center',
   gap: 'var(--bo-space-2)',
   padding: 'var(--bo-space-3)',
-  borderRadius: 'var(--bo-radius-md)',
+  borderRadius: 'var(--bo-radius-sm)',
   fontSize: 'var(--bo-text-sm)',
   fontWeight: 'var(--bo-weight-medium)' as any,
 };
@@ -111,7 +111,7 @@ export function ApprovalsPage() {
               <span style={projectLabel}>{timeAgo(a.createdAt)}</span>
               <div style={actionRow}>
                 <Button
-                  variant="primary"
+                  variant="filled"
                   size="sm"
                   onClick={() => approve(a.id)}
                   id={`approve-btn-${a.id}`}
@@ -119,10 +119,11 @@ export function ApprovalsPage() {
                   ✓ Approve
                 </Button>
                 <Button
-                  variant="danger"
+                  variant="outlined"
                   size="sm"
                   onClick={() => reject(a.id)}
                   id={`reject-btn-${a.id}`}
+                  style={{ borderColor: 'var(--bo-error)', color: 'var(--bo-error)' }}
                 >
                   ✕ Reject
                 </Button>

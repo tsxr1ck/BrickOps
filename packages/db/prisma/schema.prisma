@@ -22,6 +22,7 @@ model Project {
   runs           Run[]
   approvals      Approval[]
   workspaces     Workspace[]
+  editPlans      EditPlan[]
 }
 
 model ProjectThread {
@@ -43,6 +44,7 @@ model Run {
   finishedAt     DateTime?
 
   steps          RunStep[]
+  editPlans      EditPlan[]
 }
 
 model RunStep {
@@ -119,4 +121,31 @@ model Notification {
   message        String
   deliveryStatus String   @default("pending") // pending, delivered, failed
   createdAt      DateTime @default(now())
+}
+
+model EditPlan {
+  id          String     @id @default(cuid())
+  projectId   String
+  runId       String     @unique
+  originalReq String
+  status      String     @default("pending") // pending, executing, completed, failed
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  tasks       EditTask[]
+  project     Project    @relation(fields: [projectId], references: [id])
+  run         Run        @relation(fields: [runId], references: [id])
+}
+
+model EditTask {
+  id        String   @id @default(cuid())
+  planId    String
+  filePath  String
+  intent    String
+  isNewFile Boolean  @default(false)
+  status    String   @default("pending") // pending, in_progress, completed, failed
+  attempts  Int      @default(0)
+  errorLog  String?
+
+  plan      EditPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 }

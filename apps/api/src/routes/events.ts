@@ -49,11 +49,10 @@ eventRoutes.get('/', async (c) => {
       }).catch(() => { alive = false; });
     }, 30000);
 
-    // Keep connection open until client disconnects
     stream.onAbort(() => {
       alive = false;
       clearInterval(heartbeat);
-      bus.removeAll(); // Clean up this specific listener
+      bus.offAny(handler);
     });
 
     // Block until stream is closed
@@ -113,6 +112,7 @@ eventRoutes.get('/project/:projectId', async (c) => {
     stream.onAbort(() => {
       alive = false;
       clearInterval(heartbeat);
+      bus.offAny(handler);
     });
 
     while (alive) {

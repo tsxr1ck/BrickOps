@@ -39,7 +39,9 @@ const AUTH_DIR =
 let socket: ReturnType<typeof makeWASocket> | null = null;
 let currentState: ConnectionState = 'disconnected';
 let reconnectAttempts = 0;
+let openedAt: number | null = null;
 const MAX_RECONNECT_ATTEMPTS = 10;
+const MIN_CONNECTED_MS = 15_000;
 
 /**
  * Initialize and connect the WhatsApp session.
@@ -71,6 +73,7 @@ export async function createSession(events: SessionEvents): Promise<void> {
     auth: state,
     printQRInTerminal: true,
     browser: ['BrickOps', 'Server', '1.0.0'],
+    defaultQueryTimeoutMs: 180_000,
     // Quiet Baileys logs
     logger: {
       level: 'silent',
@@ -106,16 +109,17 @@ export async function createSession(events: SessionEvents): Promise<void> {
         return;
       }
 
-      // Reconnect with exponential backoff
+      // Reconnect: constant short delay for transient failures, exponential backoff for sustained
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        const wasTransient = openedAt !== null && (Date.now() - openedAt) < MIN_CONNECTED_MS;
+        const delay = wasTransient ? 2000 : Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
         console.log(
           `[whatsapp] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
         );
         setTimeout(() => createSession(events), delay);
       } else {
-        console.error('[whatsapp] Max reconnect attempts reached — giving up');
+        console.error('[whatsapp] Max reconnect attempts reached — consider deleting auth and re-pairing');
       }
     }
 
@@ -127,7 +131,14 @@ export async function createSession(events: SessionEvents): Promise<void> {
 
     if (connection === 'open') {
       currentState = 'open';
-      reconnectAttempts = 0;
+      openedAt = Date.now();
+      // Only reset the counter if we stay connected for a minimum time
+      // This prevents infinite reconnects when init queries time out immediately
+      setTimeout(() => {
+        if (currentState === 'open') {
+          reconnectAttempts = 0;
+        }
+      }, MIN_CONNECTED_MS);
       events.onConnectionUpdate('open');
       console.log('[whatsapp] Connected ✓');
     }

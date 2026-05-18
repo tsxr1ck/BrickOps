@@ -11,14 +11,29 @@ const containerStyle: CSSProperties = {
 };
 
 const iconWrapStyle: CSSProperties = {
-  width: '64px',
-  height: '64px',
-  borderRadius: 'var(--bo-radius-xl)',
-  background: 'var(--bo-bg-tertiary)',
+  width: '56px',
+  height: '56px',
+  borderRadius: 'var(--bo-radius-md)',
+  background: 'var(--bo-bg-elevated)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   color: 'var(--bo-text-tertiary)',
+};
+
+const titleStyle: CSSProperties = {
+  fontSize: 'var(--bo-text-lg)',
+  fontWeight: 'var(--bo-weight-semibold)',
+  color: 'var(--bo-text)',
+  marginBottom: 'var(--bo-space-1)',
+};
+
+const descStyle: CSSProperties = {
+  fontSize: 'var(--bo-text-sm)',
+  color: 'var(--bo-text-secondary)',
+  maxWidth: '280px',
+  margin: '0 auto',
+  lineHeight: '1.5',
 };
 
 interface EmptyStateProps {
@@ -33,14 +48,8 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
     <div style={containerStyle}>
       {icon && <div style={iconWrapStyle}>{icon}</div>}
       <div>
-        <h3 style={{ fontSize: 'var(--bo-text-lg)', fontWeight: 'var(--bo-weight-semibold)' as any, color: 'var(--bo-text-primary)', marginBottom: 'var(--bo-space-1)' }}>
-          {title}
-        </h3>
-        {description && (
-          <p style={{ fontSize: 'var(--bo-text-sm)', color: 'var(--bo-text-tertiary)', maxWidth: '280px', margin: '0 auto' }}>
-            {description}
-          </p>
-        )}
+        <h3 style={titleStyle}>{title}</h3>
+        {description && <p style={descStyle}>{description}</p>}
       </div>
       {action}
     </div>

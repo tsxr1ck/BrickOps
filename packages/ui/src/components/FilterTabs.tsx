@@ -1,66 +1,39 @@
-import { type CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 
-const containerStyle: CSSProperties = {
+const tabRow: CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  background: 'var(--bo-bg-secondary)',
-  borderRadius: 'var(--bo-radius-md)',
-  padding: '4px',
   gap: '2px',
-  overflowX: 'auto',
-  scrollbarWidth: 'none', // Firefox
-  msOverflowStyle: 'none',  // IE and Edge
+  borderBottom: '1px solid var(--bo-border)',
 };
 
-const tabBaseStyle: CSSProperties = {
-  padding: '6px var(--bo-space-3)',
-  borderRadius: 'var(--bo-radius-sm)',
-  fontSize: 'var(--bo-text-sm)',
-  fontWeight: 'var(--bo-weight-medium)' as any,
-  cursor: 'pointer',
-  transition: 'all var(--bo-transition-fast)',
-  border: 'none',
-  outline: 'none',
-  whiteSpace: 'nowrap',
-};
-
-export interface TabOption {
-  id: string;
-  label: string;
-}
-
-export interface FilterTabsProps {
-  options: TabOption[];
+interface FilterTabsProps {
+  options: Array<{ id: string; label: string }>;
   activeId: string;
   onChange: (id: string) => void;
-  style?: CSSProperties;
 }
 
-export function FilterTabs({ options, activeId, onChange, style }: FilterTabsProps) {
+export function FilterTabs({ options, activeId, onChange }: FilterTabsProps) {
   return (
-    <div 
-      style={{ ...containerStyle, ...style }}
-      // Hide scrollbar for WebKit
-      ref={(el) => {
-        if (el) {
-          el.style.setProperty('::-webkit-scrollbar', 'display: none');
-        }
-      }}
-    >
-      {options.map((option) => {
-        const isActive = option.id === activeId;
+    <div style={tabRow}>
+      {options.map((opt) => {
+        const isActive = opt.id === activeId;
         return (
           <button
-            key={option.id}
+            key={opt.id}
+            onClick={() => onChange(opt.id)}
             style={{
-              ...tabBaseStyle,
-              background: isActive ? 'var(--bo-bg-elevated)' : 'transparent',
-              color: isActive ? 'var(--bo-text-primary)' : 'var(--bo-text-secondary)',
-              boxShadow: isActive ? 'var(--bo-shadow-sm)' : 'none',
+              padding: 'var(--bo-space-2) var(--bo-space-4)',
+              fontSize: 'var(--bo-text-sm)',
+              fontWeight: isActive ? 600 : 400,
+              color: isActive ? 'var(--bo-accent)' : 'var(--bo-text-secondary)',
+              background: 'none',
+              border: 'none',
+              borderBottom: `2px solid ${isActive ? 'var(--bo-accent)' : 'transparent'}`,
+              cursor: 'pointer',
+              transition: 'all var(--bo-transition-fast)',
             }}
-            onClick={() => onChange(option.id)}
           >
-            {option.label}
+            {opt.label}
           </button>
         );
       })}

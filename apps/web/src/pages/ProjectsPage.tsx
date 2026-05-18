@@ -23,7 +23,7 @@ const headerSection: CSSProperties = {
 const titleStyle: CSSProperties = {
   fontSize: 'var(--bo-text-2xl)',
   fontWeight: 'var(--bo-weight-bold)' as any,
-  color: 'var(--bo-text-primary)',
+  color: 'var(--bo-text)',
   letterSpacing: '-0.5px',
 };
 
@@ -44,7 +44,7 @@ const toolbarStyle: CSSProperties = {
   gap: 'var(--bo-space-3)',
   position: 'sticky',
   top: 'var(--bo-header-height)',
-  background: 'var(--bo-bg-primary)',
+  background: 'var(--bo-bg)',
   padding: 'var(--bo-space-2) 0',
   zIndex: 'var(--bo-z-sticky)' as any,
   borderBottom: '1px solid var(--bo-border)',
@@ -79,7 +79,7 @@ const cardTopRow: CSSProperties = {
 const projectName: CSSProperties = {
   fontSize: 'var(--bo-text-lg)',
   fontWeight: 'var(--bo-weight-semibold)' as any,
-  color: 'var(--bo-text-primary)',
+  color: 'var(--bo-text)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -127,7 +127,7 @@ const fabStyle: CSSProperties = {
   right: 'var(--bo-space-4)',
   width: '56px',
   height: '56px',
-  borderRadius: 'var(--bo-radius-full)',
+  borderRadius: 'var(--bo-radius-md)',
   background: 'var(--bo-accent)',
   color: '#fff',
   display: 'flex',
@@ -195,19 +195,16 @@ export function ProjectsPage() {
             label="Total Projects" 
             value={totalCount} 
             icon={<FolderKanban size={16} />}
-            accentColor="var(--bo-info)"
           />
           <StatCard 
             label="Active" 
             value={activeCount} 
             icon={<Activity size={16} />}
-            accentColor="var(--bo-success)"
           />
           <StatCard 
             label="Needs Attention" 
             value={attentionCount} 
             icon={<ShieldAlert size={16} />}
-            accentColor="var(--bo-warning)"
           />
         </div>
       </div>
@@ -241,7 +238,7 @@ export function ProjectsPage() {
           {filteredProjects.map((p) => (
             <Card
               key={p.id}
-              variant="interactive"
+              variant="outlined"
               onClick={() => navigate(`/project/${p.slug}`)}
               id={`project-card-${p.slug}`}
               style={{ height: '100%' }}

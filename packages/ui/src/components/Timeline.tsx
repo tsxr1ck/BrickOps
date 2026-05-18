@@ -19,8 +19,6 @@ const statusColors: Record<string, string> = {
 const containerStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 0,
-  position: 'relative',
 };
 
 const entryStyle: CSSProperties = {
@@ -39,7 +37,7 @@ const dotColumnStyle: CSSProperties = {
 };
 
 const lineStyle: CSSProperties = {
-  width: '2px',
+  width: '1px',
   flex: 1,
   background: 'var(--bo-border)',
   marginTop: '4px',
@@ -63,16 +61,13 @@ export function Timeline({ entries }: TimelineProps) {
 
         return (
           <div key={entry.id} style={entryStyle}>
-            {/* Dot + vertical line */}
             <div style={dotColumnStyle}>
               <div
                 style={{
-                  width: entry.status === 'active' ? '12px' : '10px',
-                  height: entry.status === 'active' ? '12px' : '10px',
+                  width: '8px',
+                  height: '8px',
                   borderRadius: '50%',
                   background: color,
-                  border: entry.status === 'active' ? `2px solid ${color}` : 'none',
-                  boxShadow: entry.status === 'active' ? `0 0 0 4px var(--bo-accent-bg)` : 'none',
                   flexShrink: 0,
                   marginTop: '5px',
                   transition: 'all var(--bo-transition-normal)',
@@ -80,15 +75,13 @@ export function Timeline({ entries }: TimelineProps) {
               />
               {!isLast && <div style={lineStyle} />}
             </div>
-
-            {/* Content */}
             <div style={contentStyle}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--bo-space-2)' }}>
                 <span
                   style={{
                     fontSize: 'var(--bo-text-sm)',
-                    fontWeight: entry.status === 'active' ? 'var(--bo-weight-semibold)' as any : 'var(--bo-weight-medium)' as any,
-                    color: entry.status === 'active' ? 'var(--bo-text-primary)' : 'var(--bo-text-secondary)',
+                    fontWeight: entry.status === 'active' ? 600 : 500,
+                    color: entry.status === 'active' ? 'var(--bo-text)' : 'var(--bo-text-secondary)',
                   }}
                 >
                   {entry.icon} {entry.title}
@@ -98,7 +91,7 @@ export function Timeline({ entries }: TimelineProps) {
                 </span>
               </div>
               {entry.description && (
-                <p style={{ fontSize: 'var(--bo-text-xs)', color: 'var(--bo-text-tertiary)', marginTop: '2px' }}>
+                <p style={{ fontSize: 'var(--bo-text-xs)', color: 'var(--bo-text-secondary)', marginTop: '2px' }}>
                   {entry.description}
                 </p>
               )}

@@ -1,132 +1,155 @@
-import { type CSSProperties, type ReactNode } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import {
-  FolderKanban,
-  ShieldCheck,
-  Plus,
-  Settings,
-} from 'lucide-react';
+import { type CSSProperties, type ReactNode, useState, useEffect } from 'react';
+import { TopAppBar } from './TopAppBar';
+import { NavigationRail } from './NavigationRail';
+import type { NavRailItem } from './NavigationRail';
+import { NavigationBar } from './NavigationBar';
+import { FolderKanban, ShieldCheck, Settings, History, Sun, Moon, Smartphone } from 'lucide-react';
 
-/* ─── Nav items ─── */
-const navItems = [
-  { path: '/', label: 'Projects', icon: FolderKanban },
-  { path: '/approvals', label: 'Approvals', icon: ShieldCheck },
-  { path: '/new', label: 'New', icon: Plus },
-  { path: '/settings', label: 'Settings', icon: Settings },
+const navItems: NavRailItem[] = [
+  { path: '/', label: 'Projects', icon: <FolderKanban size={18} />, matchFn: (p) => p === '/' || p.startsWith('/project/') },
+  { path: '/approvals', label: 'Approvals', icon: <ShieldCheck size={18} /> },
+  { path: '/sessions', label: 'Sessions', icon: <History size={18} /> },
+  { path: '/settings', label: 'Settings', icon: <Settings size={18} /> },
 ];
 
-/* ─── Styles ─── */
-const shellStyle: CSSProperties = {
+const layoutStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   minHeight: '100dvh',
-  background: 'var(--bo-bg-primary)',
+  background: 'var(--bo-bg)',
 };
 
-const headerStyle: CSSProperties = {
-  position: 'sticky',
-  top: 0,
-  zIndex: 'var(--bo-z-sticky)' as any,
-  height: 'var(--bo-header-height)',
+const bodyStyle: CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '0 var(--bo-space-5)',
-  background: 'var(--bo-bg-primary)',
-  borderBottom: '1px solid var(--bo-border)',
-  backdropFilter: 'blur(12px)',
-};
-
-const logoStyle: CSSProperties = {
-  fontSize: 'var(--bo-text-lg)',
-  fontWeight: 'var(--bo-weight-bold)' as any,
-  color: 'var(--bo-text-primary)',
-  letterSpacing: '-0.5px',
-  textDecoration: 'none',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 'var(--bo-space-2)',
-};
-
-const mainStyle: CSSProperties = {
   flex: 1,
-  width: '100%',
-  maxWidth: 'var(--bo-max-width)',
-  margin: '0 auto',
-  padding: 'var(--bo-space-4) var(--bo-space-4) calc(var(--bo-bottom-nav-height) + var(--bo-space-4))',
+  minHeight: 0,
 };
 
-const bottomNavStyle: CSSProperties = {
-  position: 'fixed',
-  bottom: 0,
-  left: 0,
-  right: 0,
-  zIndex: 'var(--bo-z-nav)' as any,
-  height: 'var(--bo-bottom-nav-height)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-around',
-  background: 'var(--bo-bg-elevated)',
-  borderTop: '1px solid var(--bo-border)',
-  paddingBottom: 'env(safe-area-inset-bottom)',
-};
-
-const navItemStyle = (isActive: boolean): CSSProperties => ({
+const mainArea: CSSProperties = {
+  flex: 1,
   display: 'flex',
   flexDirection: 'column',
-  alignItems: 'center',
-  gap: '2px',
-  padding: 'var(--bo-space-1) var(--bo-space-3)',
-  borderRadius: 'var(--bo-radius-sm)',
-  color: isActive ? 'var(--bo-accent)' : 'var(--bo-text-tertiary)',
-  textDecoration: 'none',
-  fontSize: 'var(--bo-text-xs)',
-  fontWeight: isActive ? ('var(--bo-weight-semibold)' as any) : ('var(--bo-weight-normal)' as any),
-  transition: 'color var(--bo-transition-fast)',
-  WebkitTapHighlightColor: 'transparent',
-  minWidth: 'var(--bo-tap-target)',
-  minHeight: 'var(--bo-tap-target)',
-  justifyContent: 'center',
-});
+  minWidth: 0,
+  maxHeight: 'calc(100dvh - var(--bo-header-height))',
+};
 
-/* ─── Component ─── */
-interface AppShellProps {
-  children: ReactNode;
+const workspaceStyle: CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  overflow: 'hidden',
+};
+
+const contentStyle: CSSProperties = {
+  flex: 1,
+  overflow: 'auto',
+  padding: 'var(--bo-space-5)',
+};
+
+const previewPanelStyle: CSSProperties = {
+  width: '320px',
+  flexShrink: 0,
+  borderLeft: '1px solid var(--bo-border)',
+  background: 'var(--bo-bg-surface)',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+};
+
+const iconBtn: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '36px',
+  height: '36px',
+  borderRadius: 'var(--bo-radius-md)',
+  color: 'var(--bo-text-secondary)',
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  transition: 'all var(--bo-transition-fast)',
+};
+
+const channelPill: CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: '4px',
+  padding: '4px 10px', borderRadius: 'var(--bo-radius-sm)',
+  background: 'var(--bo-accent-bg)',
+  color: 'var(--bo-accent)',
+  fontSize: 'var(--bo-text-xs)', fontWeight: 500,
+  whiteSpace: 'nowrap',
+};
+
+export function getTheme(): 'light' | 'dark' {
+  const stored = localStorage.getItem('bo-theme');
+  if (stored === 'light' || stored === 'dark') return stored;
+  return 'dark';
 }
 
-export function AppShell({ children }: AppShellProps) {
-  const location = useLocation();
+interface AppShellProps {
+  children: ReactNode;
+  previewPanel?: ReactNode;
+}
+
+export function AppShell({ children, previewPanel }: AppShellProps) {
+  const [theme, setTheme] = useState<'light' | 'dark'>(getTheme);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('bo-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const toggleTheme = () => setTheme((t) => (t === 'light' ? 'dark' : 'light'));
+
+  const renderMobile = () => (
+    <>
+      <TopAppBar
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--bo-space-1)' }}>
+            <span style={channelPill}><Smartphone size={12} /> + Web</span>
+            <button style={iconBtn} onClick={toggleTheme} aria-label="Toggle theme">
+              {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+            </button>
+          </div>
+        }
+      />
+      <div style={{ flex: 1, overflow: 'auto' }}>{children}</div>
+      <NavigationBar items={navItems} />
+    </>
+  );
+
+  const renderDesktop = () => (
+    <>
+      <TopAppBar
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--bo-space-1)' }}>
+            <span style={channelPill}><Smartphone size={12} /> WhatsApp + Web</span>
+            <button style={iconBtn} onClick={toggleTheme} aria-label="Toggle theme">
+              {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+            </button>
+          </div>
+        }
+      />
+      <div style={bodyStyle}>
+        <NavigationRail items={navItems} />
+        <div style={mainArea}>
+          <div style={workspaceStyle}>
+            <div style={contentStyle}>{children}</div>
+            {previewPanel && <div style={previewPanelStyle}>{previewPanel}</div>}
+          </div>
+        </div>
+      </div>
+    </>
+  );
 
   return (
-    <div style={shellStyle}>
-      {/* Header */}
-      <header style={headerStyle}>
-        <Link to="/" style={logoStyle}>
-          <span style={{ fontSize: '20px' }}>⬡</span>
-          BrickOps
-        </Link>
-      </header>
-
-      {/* Main Content */}
-      <main style={mainStyle}>{children}</main>
-
-      {/* Bottom Navigation */}
-      <nav style={bottomNavStyle}>
-        {navItems.map((item) => {
-          const isActive =
-            item.path === '/'
-              ? location.pathname === '/' || location.pathname.startsWith('/project/')
-              : location.pathname === item.path;
-          const Icon = item.icon;
-
-          return (
-            <Link key={item.path} to={item.path} style={navItemStyle(isActive)}>
-              <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
+    <div style={layoutStyle}>
+      {isMobile ? renderMobile() : renderDesktop()}
     </div>
   );
 }

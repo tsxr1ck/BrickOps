@@ -1,31 +1,26 @@
 import { type CSSProperties, type ReactNode, useState } from 'react';
 
-type CardVariant = 'default' | 'interactive' | 'approval';
+type CardVariant = 'raised' | 'outlined' | 'approval';
 
 const variantBase: Record<CardVariant, CSSProperties> = {
-  default: {
-    background: 'var(--bo-bg-elevated)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--bo-border)',
+  raised: {
+    background: 'var(--bo-bg-raised)',
+    boxShadow: 'var(--bo-shadow-sm)',
   },
-  interactive: {
-    background: 'var(--bo-bg-elevated)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--bo-border)',
-    cursor: 'pointer',
+  outlined: {
+    background: 'var(--bo-bg-surface)',
+    border: '1px solid var(--bo-border)',
+    boxShadow: 'var(--bo-shadow-sm)',
   },
   approval: {
-    background: 'var(--bo-bg-elevated)',
-    borderWidth: '1px 1px 1px 4px',
-    borderStyle: 'solid',
-    borderColor: 'var(--bo-warning)',
+    background: 'var(--bo-bg-surface)',
+    borderLeft: '3px solid var(--bo-warning)',
+    boxShadow: 'var(--bo-shadow-sm)',
   },
 };
 
 const baseStyle: CSSProperties = {
-  borderRadius: 'var(--bo-radius-lg)',
+  borderRadius: 'var(--bo-radius-md)',
   padding: 'var(--bo-space-4) var(--bo-space-5)',
   transition: 'all var(--bo-transition-normal)',
 };
@@ -38,9 +33,9 @@ interface CardProps {
   id?: string;
 }
 
-export function Card({ variant = 'default', children, onClick, style, id }: CardProps) {
+export function Card({ variant = 'outlined', children, onClick, style, id }: CardProps) {
   const [hover, setHover] = useState(false);
-  const isInteractive = variant === 'interactive' || !!onClick;
+  const isInteractive = !!onClick;
 
   return (
     <div
@@ -48,8 +43,9 @@ export function Card({ variant = 'default', children, onClick, style, id }: Card
       style={{
         ...baseStyle,
         ...variantBase[variant],
+        cursor: isInteractive ? 'pointer' : undefined,
         ...(isInteractive && hover
-          ? { boxShadow: 'var(--bo-shadow-md)', borderColor: 'var(--bo-accent-border)', transform: 'translateY(-1px)' }
+          ? { boxShadow: 'var(--bo-shadow-md)', transform: 'translateY(-1px)' }
           : {}),
         ...style,
       }}

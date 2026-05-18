@@ -21,6 +21,29 @@ async function sendWhatsApp(recipientJid: string, message: string): Promise<void
   }
 }
 
+async function sendWhatsAppDocument(
+  recipientJid: string,
+  buffer: Buffer,
+  filename: string,
+  caption?: string,
+): Promise<void> {
+  if (!recipientJid) return;
+  try {
+    await fetch(`${GATEWAY_URL}/outbound-document`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipientJid,
+        buffer: Array.from(buffer),
+        filename,
+        caption,
+      }),
+    });
+  } catch (err) {
+    console.error("[pipeline] WhatsApp document send failed:", err);
+  }
+}
+
 async function sendWhatsAppImage(recipientJid: string, buffer: Buffer, caption?: string): Promise<void> {
   if (!recipientJid) return;
   try {
@@ -110,8 +133,33 @@ async function captureAndSendScreenshot(projectId: string, runId: string): Promi
   }
 }
 
+const statusMessages: Record<string, string> = {
+  planning: "\u{1F9D1}\u200D\u{1F4BB} Architect is analyzing the request...",
+  coding: "\u{1F9D1}\u200D\u{1F4BB} Developer is generating the code...",
+  reviewing: "\u{1F50D} Running TS compiler and validation...",
+  installing: "\u{1F4E6} Installing dependencies...",
+  building: "\u{1F3D7}\uFE0F Building the project...",
+  capturing_preview: "\u{1F4F8} Capturing preview...",
+  ready_to_deploy: "\u2705 Build complete!",
+};
+
 async function setStatus(projectId: string, status: ProjectStatus): Promise<void> {
   await prisma.project.update({ where: { id: projectId }, data: { status } });
+
+  const operatorJid = process.env.BRICKOPS_OPERATOR_JID;
+  const userMessage = statusMessages[status];
+
+  if (operatorJid && userMessage) {
+    try {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { name: true },
+      });
+      if (project) {
+        sendWhatsApp(operatorJid, `*[${project.name}]* ${userMessage}`);
+      }
+    } catch {}
+  }
 }
 
 /**

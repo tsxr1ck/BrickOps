@@ -8,6 +8,12 @@
   ],
   "scripts": {
     "dev": "bun --filter \"*\" run dev",
+    "dev:api": "bun run apps/api/src/index.ts",
+    "dev:web": "bun run --cwd apps/web dev",
+    "dev:whatsapp": "bun run apps/whatsapp-gateway/src/index.ts",
+    "start": "bash start.sh",
+    "agent": "bun run scripts/agent-cli.ts",
+    "agent:single": "bun run scripts/agent-cli.ts --single",
     "build": "bun --filter \"*\" run build",
     "lint": "bun --filter \"*\" run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\""

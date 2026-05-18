@@ -1,65 +1,72 @@
-import { type CSSProperties, type InputHTMLAttributes, type ReactNode, forwardRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useState, useRef } from 'react';
 
-const containerStyle: CSSProperties = {
-  position: 'relative',
+const wrapperStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  width: '100%',
+  gap: '8px',
+  padding: '8px 12px',
+  borderRadius: 'var(--bo-radius-sm)',
+  transition: 'all var(--bo-transition-fast)',
 };
 
-const inputBaseStyle: CSSProperties = {
-  width: '100%',
-  height: '40px',
-  background: 'var(--bo-bg-secondary)',
-  border: '1px solid var(--bo-border)',
-  borderRadius: 'var(--bo-radius-md)',
-  padding: '0 var(--bo-space-3)',
-  fontSize: 'var(--bo-text-sm)',
-  color: 'var(--bo-text-primary)',
-  transition: 'all var(--bo-transition-fast)',
+const inputStyle: CSSProperties = {
+  flex: 1,
+  background: 'none',
+  border: 'none',
   outline: 'none',
+  color: 'var(--bo-text)',
+  fontSize: 'var(--bo-text-sm)',
+  caretColor: 'var(--bo-accent)',
+  minHeight: '20px',
 };
 
 const iconStyle: CSSProperties = {
-  position: 'absolute',
-  left: 'var(--bo-space-3)',
-  color: 'var(--bo-text-tertiary)',
   display: 'flex',
-  alignItems: 'center',
-  pointerEvents: 'none',
+  color: 'var(--bo-text-tertiary)',
 };
 
-export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+interface InputProps {
   icon?: ReactNode;
+  value?: string;
+  defaultValue?: string;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFocus?: (e: React.FocusEvent<HTMLInputElement>) => void;
+  onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  type?: string;
+  name?: string;
+  id?: string;
+  autoFocus?: boolean;
+  style?: CSSProperties;
+  className?: string;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(({ icon, style, ...props }, ref) => {
+export function Input({ icon, ...rest }: InputProps) {
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div style={containerStyle}>
-      {icon && <div style={iconStyle}>{icon}</div>}
+    <div
+      style={{
+        ...wrapperStyle,
+        background: focused ? 'var(--bo-bg-input)' : 'var(--bo-bg-surface)',
+        border: focused
+          ? '1px solid var(--bo-accent)'
+          : '1px solid var(--bo-border)',
+        boxShadow: focused ? 'var(--bo-shadow-brand)' : 'none',
+        ...(rest as any).style,
+      }}
+      onClick={() => inputRef.current?.focus()}
+    >
+      {icon && <span style={iconStyle}>{icon}</span>}
       <input
-        ref={ref}
-        style={{
-          ...inputBaseStyle,
-          paddingLeft: icon ? 'calc(var(--bo-space-3) * 2 + 16px)' : 'var(--bo-space-3)',
-          borderColor: focused ? 'var(--bo-border-focus)' : 'var(--bo-border)',
-          boxShadow: focused ? '0 0 0 2px var(--bo-accent-bg)' : 'none',
-          ...style,
-        }}
-        onFocus={(e) => {
-          setFocused(true);
-          props.onFocus?.(e);
-        }}
-        onBlur={(e) => {
-          setFocused(false);
-          props.onBlur?.(e);
-        }}
-        {...props}
+        ref={inputRef}
+        style={inputStyle}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        {...rest}
       />
     </div>
   );
-});
-
-Input.displayName = 'Input';
+}

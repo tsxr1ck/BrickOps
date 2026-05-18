@@ -181,6 +181,50 @@ projectRoutes.post('/:id/threads', async (c) => {
   }
 });
 
+// --- Web-based change request (modify project) ---
+projectRoutes.post('/:id/modify', async (c) => {
+  const { id } = c.req.param();
+  const body = await c.req.json<{ message: string }>();
+
+  if (!body.message?.trim()) {
+    return c.json({ error: 'Missing message' }, 400);
+  }
+
+  try {
+    // 1. Store the user request as a thread message
+    await prisma.projectThread.create({
+      data: {
+        projectId: id,
+        role: 'user',
+        content: body.message,
+      },
+    });
+
+    // 2. Fetch the project name for the event
+    const project = await prisma.project.findUnique({
+      where: { id },
+      select: { name: true, source: true },
+    });
+
+    // 3. Emit project.created to trigger a new run
+    // The orchestrator listens for this to start/continue the pipeline
+    bus.emit({
+      type: 'project.created',
+      projectId: id,
+      name: project?.name || 'unknown',
+      source: (project?.source as 'web' | 'whatsapp' | 'imported') || 'web',
+      timestamp: Date.now(),
+    });
+
+    return c.json({ ok: true, message: 'Change request submitted' }, 201);
+  } catch (err: any) {
+    if (err.code === 'P2003') {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+    throw err;
+  }
+});
+
 // --- Delete (archive) project ---
 projectRoutes.delete('/:id', async (c) => {
   const { id } = c.req.param();

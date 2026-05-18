@@ -57,7 +57,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         max_tokens: options.maxTokens || 4096,
         temperature: options.temperature ?? 0.3,
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(120000),
     });
 
     if (!response.ok) {
@@ -138,6 +138,7 @@ export class AnthropicAdapter implements ProviderAdapter {
           content: m.content,
         })),
       }),
+      signal: AbortSignal.timeout(120000),
     });
 
     if (!response.ok) {
