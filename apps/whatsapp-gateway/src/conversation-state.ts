@@ -190,3 +190,61 @@ export function clearSelectedProject(operatorJid: string): void {
     `[conversation] Project deselected → ${operatorJid.split('@')[0]}`
   );
 }
+
+// --- Active session tracking ---
+
+export interface ActiveSession {
+  sessionId: string;
+  projectId: string;
+  startedAt: number;
+}
+
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+
+/** operatorJid → active session */
+const activeSessions = new Map<string, ActiveSession>();
+
+/**
+ * Set the operator's active session for a project.
+ * If they already have a session for this project, it's reused.
+ */
+export function setActiveSession(operatorJid: string, sessionId: string, projectId: string): void {
+  activeSessions.set(operatorJid, { sessionId, projectId, startedAt: Date.now() });
+}
+
+/**
+ * Get the operator's active session, if any.
+ * Returns null if timed out.
+ */
+export function getActiveSession(operatorJid: string): ActiveSession | null {
+  const s = activeSessions.get(operatorJid);
+  if (!s) return null;
+  if (Date.now() - s.startedAt > SESSION_TIMEOUT_MS) {
+    activeSessions.delete(operatorJid);
+    return null;
+  }
+  return s;
+}
+
+/**
+ * Clear the operator's active session.
+ */
+export function clearActiveSession(operatorJid: string): void {
+  activeSessions.delete(operatorJid);
+}
+
+/**
+ * Get or create an active session for an operator + project.
+ * If the operator already has a session for a different project, returns null
+ * (caller should clear first).
+ */
+export function getSessionForProject(operatorJid: string, projectId: string): ActiveSession | null {
+  const s = activeSessions.get(operatorJid);
+  if (!s) return null;
+  if (Date.now() - s.startedAt > SESSION_TIMEOUT_MS) {
+    activeSessions.delete(operatorJid);
+    return null;
+  }
+  if (s.projectId !== projectId) return null;
+  return s;
+}

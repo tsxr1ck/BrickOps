@@ -25,14 +25,14 @@ eventRoutes.get('/', async (c) => {
 
       const sseEvent: SSEEvent = {
         type: mapEventType(event.type),
-        data: event as any,
+        data: event as unknown,
         timestamp: Date.now(),
       };
 
-      stream.writeSSE({
+      void stream.writeSSE({
         event: sseEvent.type,
         data: JSON.stringify(sseEvent.data),
-      }).catch(() => { alive = false; });
+      });
     };
 
     bus.onAny(handler);
@@ -43,10 +43,10 @@ eventRoutes.get('/', async (c) => {
         clearInterval(heartbeat);
         return;
       }
-      stream.writeSSE({
+      void stream.writeSSE({
         event: 'heartbeat',
         data: JSON.stringify({ timestamp: Date.now() }),
-      }).catch(() => { alive = false; });
+      });
     }, 30000);
 
     stream.onAbort(() => {
@@ -57,7 +57,7 @@ eventRoutes.get('/', async (c) => {
 
     // Block until stream is closed
     while (alive) {
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise<void>((r) => setTimeout(r, 1000));
     }
   });
 });
@@ -73,20 +73,20 @@ eventRoutes.get('/project/:projectId', async (c) => {
       if (!alive) return;
 
       // Filter to only events for this project
-      if ('projectId' in event && (event as any).projectId !== projectId) {
+      if ('projectId' in event && (event as Record<string, unknown>).projectId !== projectId) {
         return;
       }
 
       const sseEvent: SSEEvent = {
         type: mapEventType(event.type),
-        data: event as any,
+        data: event as unknown,
         timestamp: Date.now(),
       };
 
-      stream.writeSSE({
+      void stream.writeSSE({
         event: sseEvent.type,
         data: JSON.stringify(sseEvent.data),
-      }).catch(() => { alive = false; });
+      });
     };
 
     bus.onAny(handler);
@@ -103,10 +103,10 @@ eventRoutes.get('/project/:projectId', async (c) => {
         clearInterval(heartbeat);
         return;
       }
-      stream.writeSSE({
+      void stream.writeSSE({
         event: 'heartbeat',
         data: JSON.stringify({ timestamp: Date.now() }),
-      }).catch(() => { alive = false; });
+      });
     }, 30000);
 
     stream.onAbort(() => {
@@ -116,7 +116,7 @@ eventRoutes.get('/project/:projectId', async (c) => {
     });
 
     while (alive) {
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise<void>((r) => setTimeout(r, 1000));
     }
   });
 });
@@ -126,9 +126,18 @@ eventRoutes.get('/project/:projectId', async (c) => {
  */
 function mapEventType(type: SystemEventType): SSEEventType {
   if (type.startsWith('run.')) return 'run.step';
+  if (type === 'project.created') return 'project.created';
+  if (type === 'project.updated') return 'project.updated';
   if (type.startsWith('project.')) return 'project.update';
   if (type === 'approval.requested') return 'approval.new';
   if (type === 'approval.resolved') return 'approval.resolved';
   if (type.startsWith('notification.')) return 'notification';
-  return 'heartbeat'; // fallback for unrecognized event types
+  if (type.startsWith('clarification.')) return 'project.update';
+  if (type.startsWith('session.')) return 'session.run';
+  if (type.startsWith('llm_')) return 'session.run';
+  if (type.startsWith('tool_')) return 'session.run';
+  if (type.startsWith('file_')) return 'session.run';
+  if (type.startsWith('diff_')) return 'session.run';
+  if (type.startsWith('tests_')) return 'session.run';
+  return 'heartbeat';
 }

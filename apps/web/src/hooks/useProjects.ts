@@ -75,7 +75,25 @@ export function useProject(slugOrId: string) {
     return () => evtSource.close();
   }, [projectId, fetchProject]);
 
-  return { project, run, threads, fetchProject };
+  async function submitClarification(answers: string[]) {
+    if (!projectId) return;
+    try {
+      const res = await fetch(`${API_BASE}/projects/${projectId}/clarify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers }),
+      });
+      if (res.ok) {
+        // Trigger pipeline resume
+        await fetch(`${API_BASE}/projects/${projectId}/trigger`, { method: 'POST' });
+        fetchProject();
+      }
+    } catch (err) {
+      console.error('Failed to submit clarification', err);
+    }
+  }
+
+  return { project, run, threads, fetchProject, submitClarification };
 }
 
 export function useApprovals() {
@@ -155,16 +173,49 @@ export async function sendModifyRequest(projectId: string, message: string) {
 
 export function useWorkspaceFiles(projectId: string) {
   const [files, setFiles] = useState<Array<{ path: string; size: number; isDir: boolean }>>([]);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  const refresh = useCallback(async () => {
     if (!projectId) return;
-    fetch(`${API_BASE}/projects/${projectId}/files`)
-      .then((res) => res.ok ? res.json() : { files: [] })
-      .then((data) => setFiles(data.files || []))
-      .catch(() => setFiles([]));
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/projects/${projectId}/files`);
+      if (res.ok) {
+        const data = await res.json();
+        setFiles(data.files || []);
+      }
+    } catch {
+      setFiles([]);
+    } finally {
+      setLoading(false);
+    }
   }, [projectId]);
 
-  return { files };
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return { files, loading, refresh };
+}
+
+export function useWorkspaceFileContent(projectId: string, filePath: string | null) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!projectId || !filePath) { setContent(null); return; }
+
+    let cancelled = false;
+    setLoading(true);
+
+    fetch(`${API_BASE}/projects/${projectId}/files/${filePath}`)
+      .then((res) => res.ok ? res.json() : { content: null })
+      .then((data) => { if (!cancelled) setContent(data.content); })
+      .catch(() => { if (!cancelled) setContent(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [projectId, filePath]);
+
+  return { content, loading };
 }
 
 export function useWorkspaceInfo(projectId: string) {

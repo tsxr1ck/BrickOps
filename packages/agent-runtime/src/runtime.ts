@@ -1,5 +1,6 @@
 import type { Provider, Tool, Message } from '@brickops/contracts';
 import type { MessageService, SessionService } from '@brickops/db';
+import { logger } from './logger';
 
 export interface AgentEvent {
   type: 'response' | 'error' | 'summarize';
@@ -12,6 +13,7 @@ export interface ExecuteAgentOptions {
   sessionId: string;
   content: string;
   attachments?: { path: string; mimeType: string; data?: Uint8Array }[];
+  emit?: (event: Record<string, unknown>) => void;
 }
 
 /**
@@ -31,6 +33,7 @@ export class AgentRuntime {
   }
 
   cancel(sessionId: string): void {
+    logger.info('cancel requested', { sessionId });
     const ac = this.activeRequests.get(sessionId);
     if (ac) {
       ac.abort();
@@ -71,10 +74,14 @@ export class AgentRuntime {
     messages: MessageService,
     options: ExecuteAgentOptions
   ): AsyncGenerator<AgentEvent> {
-    const { sessionId, content } = options;
+    const { sessionId, content, emit } = options;
+    const runId = sessionId;
+
+    logger.info('execute start', { runId, sessionId, contentLength: content.length });
 
     // Check session busy
     if (this.isSessionBusy(sessionId)) {
+      logger.warn('session busy, rejecting', { runId, sessionId });
       yield {
         type: 'error',
         error: new Error(`Session ${sessionId} is busy`),
@@ -86,11 +93,14 @@ export class AgentRuntime {
     const controller = new AbortController();
     this.trackRequest(sessionId, controller);
 
+    const startedAt = Date.now();
+
     try {
       // Ensure session exists
       let session = sessions.get(sessionId);
       if (!session) {
         session = sessions.create({ id: sessionId });
+        logger.info('created new session', { runId, sessionId });
       }
 
       // Ensure a message history starting point
@@ -130,7 +140,8 @@ export class AgentRuntime {
           sessionId,
           history,
           messages,
-          controller.signal
+          controller.signal,
+          emit
         );
 
         if (controller.signal.aborted) {
@@ -147,6 +158,8 @@ export class AgentRuntime {
           continue;
         }
 
+        const durationMs = Date.now() - startedAt;
+        logger.info('execute complete', { runId, sessionId, durationMs, finishReason });
         yield {
           type: 'response',
           message: assistantMsg,
@@ -155,6 +168,8 @@ export class AgentRuntime {
         break;
       }
     } catch (error: any) {
+      const durationMs = Date.now() - startedAt;
+      logger.error('execute failed', { runId, sessionId, durationMs, error: error.message });
       if (controller.signal.aborted) {
         yield { type: 'response', done: true };
       } else {
@@ -162,6 +177,8 @@ export class AgentRuntime {
       }
     } finally {
       this.untrackRequest(sessionId);
+      const durationMs = Date.now() - startedAt;
+      logger.info('execute exit', { runId, sessionId, durationMs });
     }
   }
 
@@ -175,14 +192,24 @@ export class AgentRuntime {
     messages: MessageService,
     sessionId: string
   ): Promise<Message | undefined> {
-    if (this.isSessionBusy(sessionId)) return undefined;
+    const runId = sessionId + '-summarize';
+    if (this.isSessionBusy(sessionId)) {
+      logger.warn('summarize skipped — session busy', { runId, sessionId });
+      return undefined;
+    }
+
+    const startedAt = Date.now();
+    logger.info('summarize start', { runId, sessionId });
 
     const controller = new AbortController();
-    this.trackRequest(sessionId + '-summarize', controller);
+    this.trackRequest(runId, controller);
 
     try {
       const history = messages.list(sessionId);
-      if (history.length === 0) return undefined;
+      if (history.length === 0) {
+        logger.info('summarize skipped — empty history', { runId, sessionId });
+        return undefined;
+      }
 
       const summarizePrompt: Message = {
         id: 'summarize-prompt',
@@ -215,11 +242,15 @@ export class AgentRuntime {
       sessions.setSummaryMessageId(sessionId, summaryMsg.id);
       sessions.trackUsage(sessionId, summarizeProvider.model().id, result.usage);
 
+      const durationMs = Date.now() - startedAt;
+      logger.info('summarize complete', { runId, sessionId, durationMs });
       return summaryMsg;
     } catch (err: any) {
+      const durationMs = Date.now() - startedAt;
+      logger.error('summarize failed', { runId, sessionId, durationMs, error: err.message });
       return undefined;
     } finally {
-      this.untrackRequest(sessionId + '-summarize');
+      this.untrackRequest(runId);
     }
   }
 
@@ -229,8 +260,13 @@ export class AgentRuntime {
     sessionId: string,
     history: Message[],
     messages: MessageService,
-    abortSignal: AbortSignal
+    abortSignal: AbortSignal,
+    emit?: (event: Record<string, unknown>) => void
   ): Promise<{ assistantMsg: Message; toolMsg: Message | undefined }> {
+    const runId = sessionId;
+    const startedAt = Date.now();
+    logger.info('streamAndHandleEvents start', { runId, sessionId });
+
     const assistantMsg = messages.create(sessionId, {
       role: 'assistant',
       parts: [],
@@ -253,18 +289,22 @@ export class AgentRuntime {
       for await (const event of eventStream) {
         if (abortSignal.aborted) break;
 
+        const ts = Date.now();
         switch (event.type) {
           case 'thinking_delta':
-            messages.appendContentDelta(sessionId, assistantMsg.id, event.content);
+            messages.appendReasoningDelta(sessionId, assistantMsg.id, event.content);
+            emit?.({ type: 'llm_thinking_delta', sessionId, runId: sessionId, content: event.content, timestamp: ts });
             break;
 
           case 'content_delta':
             messages.appendContentDelta(sessionId, assistantMsg.id, event.content);
+            emit?.({ type: 'llm_content_delta', sessionId, runId: sessionId, content: event.content, timestamp: ts });
             break;
 
           case 'tool_use_start':
             toolCalls.push(event.toolCall);
             messages.setToolCalls(sessionId, assistantMsg.id, [...toolCalls]);
+            emit?.({ type: 'tool_started', sessionId, runId: sessionId, toolName: event.toolCall.name, toolCallId: event.toolCall.id, input: event.toolCall.input as Record<string, unknown>, timestamp: ts });
             break;
 
           case 'tool_use_stop':
@@ -298,7 +338,11 @@ export class AgentRuntime {
     // Execute tool calls
     const toolResults: import('@brickops/contracts').ToolResultContent[] = [];
 
+    const toolStart = Date.now();
+    logger.info('tool calls start', { runId, sessionId, toolCount: toolCalls.length, toolNames: toolCalls.map(t => t.name) });
+
     for (const tc of toolCalls) {
+      const toolTs = Date.now();
       if (abortSignal.aborted) {
         toolResults.push({
           type: 'tool_result',
@@ -306,25 +350,31 @@ export class AgentRuntime {
           content: 'Tool execution canceled by user',
           isError: true,
         });
+        emit?.({ type: 'tool_finished', sessionId, runId: sessionId, toolName: tc.name, toolCallId: tc.id, result: 'canceled', isError: true, timestamp: toolTs });
         continue;
       }
 
       const tool = filteredTools.find((t) => t.info().name === tc.name);
       if (!tool) {
+        logger.warn('tool not found', { runId, sessionId, toolName: tc.name, toolCallId: tc.id });
         toolResults.push({
           type: 'tool_result',
           toolCallId: tc.id,
           content: `Tool not found: ${tc.name}`,
           isError: true,
         });
+        emit?.({ type: 'tool_finished', sessionId, runId: sessionId, toolName: tc.name, toolCallId: tc.id, result: `Tool not found: ${tc.name}`, isError: true, timestamp: toolTs });
         continue;
       }
 
+      const toolRunStart = Date.now();
+      logger.info('tool run start', { runId, sessionId, toolName: tc.name, toolCallId: tc.id });
       try {
         const result = await tool.run(
           { sessionId, messageId: assistantMsg.id, abortSignal },
           { id: tc.id, name: tc.name, input: tc.input }
         );
+        const toolDuration = Date.now() - toolRunStart;
         toolResults.push({
           type: 'tool_result',
           toolCallId: tc.id,
@@ -332,15 +382,23 @@ export class AgentRuntime {
           metadata: result.metadata,
           isError: result.isError || false,
         });
+        emit?.({ type: 'tool_finished', sessionId, runId: sessionId, toolName: tc.name, toolCallId: tc.id, result: result.content, isError: result.isError || false, timestamp: toolTs });
+        logger.info('tool run complete', { runId, sessionId, toolName: tc.name, toolCallId: tc.id, durationMs: toolDuration, isError: result.isError || false });
       } catch (err: any) {
+        const toolDuration = Date.now() - toolRunStart;
+        logger.error('tool run failed', { runId, sessionId, toolName: tc.name, toolCallId: tc.id, durationMs: toolDuration, error: err.message });
         toolResults.push({
           type: 'tool_result',
           toolCallId: tc.id,
           content: `Tool execution error: ${err.message}`,
           isError: true,
         });
+        emit?.({ type: 'tool_finished', sessionId, runId: sessionId, toolName: tc.name, toolCallId: tc.id, result: `Tool execution error: ${err.message}`, isError: true, timestamp: toolTs });
       }
     }
+
+    const toolDuration = Date.now() - toolStart;
+    logger.info('tool calls complete', { runId, sessionId, toolCount: toolCalls.length, totalDurationMs: toolDuration });
 
     // Create tool role message with results
     const toolMsg =
@@ -351,6 +409,8 @@ export class AgentRuntime {
           })
         : undefined;
 
+    const durationMs = Date.now() - startedAt;
+    logger.info('streamAndHandleEvents complete', { runId, sessionId, durationMs, hasToolMsg: !!toolMsg });
     return { assistantMsg: updatedMsg, toolMsg };
   }
 }

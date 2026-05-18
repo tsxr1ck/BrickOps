@@ -1,26 +1,13 @@
 import type { PipelineContext } from '../pipeline';
 import { prisma } from '@brickops/db';
 import { executor } from '../executor';
-
-const GATEWAY_URL = process.env.BRICKOPS_GATEWAY_URL || 'http://localhost:3002';
-
-async function sendWhatsApp(recipientJid: string, message: string): Promise<void> {
-  try {
-    await fetch(`${GATEWAY_URL}/outbound`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientJid, message }),
-    });
-  } catch (err) {
-    console.error('[intake] Failed to send WhatsApp:', err);
-  }
-}
+import { deliverWhatsApp } from '@brickops/notifications';
 
 async function startClarificationState(
   operatorJid: string, projectId: string, projectSlug: string, projectName: string, questions: string[]
 ): Promise<void> {
   try {
-    await fetch(`${GATEWAY_URL}/clarification/start`, {
+    await fetch(`${process.env.BRICKOPS_GATEWAY_URL || 'http://localhost:3002'}/clarification/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ operatorJid, projectId, projectSlug, projectName, questions }),
@@ -144,7 +131,7 @@ Question guidelines:
           `Reply with answers (one per line or all at once).`,
         ].join('\n');
 
-        await sendWhatsApp(operatorJid, message);
+        await deliverWhatsApp(undefined, operatorJid, message, 'clarification_request', ctx.projectId);
         await startClarificationState(operatorJid, ctx.projectId, project.slug, project.name, classification.questions);
       }
     }

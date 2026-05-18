@@ -1,4 +1,4 @@
-import { getSocket } from './session';
+import { getSocket, getConnectionState } from './session';
 
 /**
  * Outbound message sender with rate limiting.
@@ -19,25 +19,47 @@ async function waitForRateLimit(): Promise<void> {
   lastSentAt = Date.now();
 }
 
-/**
- * Send a plain text message.
- */
-export async function sendText(jid: string, text: string): Promise<boolean> {
+function isAuthenticated(): boolean {
   const sock = getSocket();
-  if (!sock) {
-    console.error('[whatsapp:sender] No active socket — message dropped');
+  if (!sock) return false;
+  // Baileys creates the socket immediately but auth state isn't ready
+  // until QR scan completes. Check for a valid creds.me ID.
+  try {
+    return !!((sock as any)?.authState?.creds?.me?.id);
+  } catch {
     return false;
   }
+}
 
+async function guardedSend(jid: string, sendFn: () => Promise<void>): Promise<boolean> {
+  const connectionState = getConnectionState();
+  if (connectionState !== 'open') {
+    console.warn(`[whatsapp:sender] Connection state is "${connectionState}" — message dropped`);
+    return false;
+  }
+  if (!isAuthenticated()) {
+    console.warn('[whatsapp:sender] Socket not authenticated — message dropped');
+    return false;
+  }
   try {
     await waitForRateLimit();
-    await sock.sendMessage(jid, { text });
-    console.log(`[whatsapp:sender] → ${jid.split('@')[0]}: ${text.slice(0, 80)}...`);
+    await sendFn();
     return true;
   } catch (err) {
     console.error('[whatsapp:sender] Failed to send:', err);
     return false;
   }
+}
+
+/**
+ * Send a plain text message.
+ */
+export async function sendText(jid: string, text: string): Promise<boolean> {
+  const sock = getSocket();
+  return guardedSend(jid, async () => {
+    await sock!.sendMessage(jid, { text });
+    console.log(`[whatsapp:sender] → ${jid.split('@')[0]}: ${text.slice(0, 80)}...`);
+  });
 }
 
 /**
@@ -49,14 +71,8 @@ export async function sendReply(
   quotedMessageId: string
 ): Promise<boolean> {
   const sock = getSocket();
-  if (!sock) {
-    console.error('[whatsapp:sender] No active socket — reply dropped');
-    return false;
-  }
-
-  try {
-    await waitForRateLimit();
-    await sock.sendMessage(jid, {
+  return guardedSend(jid, async () => {
+    await sock!.sendMessage(jid, {
       text,
       quoted: {
         key: {
@@ -66,11 +82,7 @@ export async function sendReply(
         message: {},
       } as any,
     });
-    return true;
-  } catch (err) {
-    console.error('[whatsapp:sender] Failed to send reply:', err);
-    return false;
-  }
+  });
 }
 
 /**
@@ -83,25 +95,15 @@ export async function sendDocument(
   caption?: string
 ): Promise<boolean> {
   const sock = getSocket();
-  if (!sock) {
-    console.error('[whatsapp:sender] No active socket — document dropped');
-    return false;
-  }
-
-  try {
-    await waitForRateLimit();
-    await sock.sendMessage(jid, {
+  return guardedSend(jid, async () => {
+    await sock!.sendMessage(jid, {
       document: buffer,
       mimetype: 'application/pdf',
       fileName: filename,
       caption,
     });
     console.log(`[whatsapp:sender] → ${jid.split('@')[0]}: [document: ${filename}]`);
-    return true;
-  } catch (err) {
-    console.error('[whatsapp:sender] Failed to send document:', err);
-    return false;
-  }
+  });
 }
 
 /**
@@ -113,22 +115,12 @@ export async function sendImage(
   caption?: string
 ): Promise<boolean> {
   const sock = getSocket();
-  if (!sock) {
-    console.error('[whatsapp:sender] No active socket — image dropped');
-    return false;
-  }
-
-  try {
-    await waitForRateLimit();
-    await sock.sendMessage(jid, {
+  return guardedSend(jid, async () => {
+    await sock!.sendMessage(jid, {
       image: buffer,
       caption: caption || '',
       mimetype: 'image/png',
     });
     console.log(`[whatsapp:sender] → ${jid.split('@')[0]}: [image] ${caption?.slice(0, 50) || ''}`);
-    return true;
-  } catch (err) {
-    console.error('[whatsapp:sender] Failed to send image:', err);
-    return false;
-  }
+  });
 }

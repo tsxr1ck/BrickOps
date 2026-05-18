@@ -1,8 +1,10 @@
-import { type CSSProperties, type ReactNode, useState, useEffect } from 'react';
+import { type CSSProperties, type ReactNode, useState, useEffect, useCallback, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { TopAppBar } from './TopAppBar';
 import { NavigationRail } from './NavigationRail';
 import type { NavRailItem } from './NavigationRail';
 import { NavigationBar } from './NavigationBar';
+import { PageTitleContext, type PageTitleValue } from './PageTitleContext';
 import { FolderKanban, ShieldCheck, Settings, History, Sun, Moon, Smartphone } from 'lucide-react';
 
 const navItems: NavRailItem[] = [
@@ -11,6 +13,16 @@ const navItems: NavRailItem[] = [
   { path: '/sessions', label: 'Sessions', icon: <History size={18} /> },
   { path: '/settings', label: 'Settings', icon: <Settings size={18} /> },
 ];
+
+function getRouteMeta(pathname: string): PageTitleValue {
+  if (pathname === '/') return { title: 'Projects' };
+  if (pathname.startsWith('/project/')) return { title: 'Workspace', backTo: '/' };
+  if (pathname.startsWith('/approvals')) return { title: 'Approvals' };
+  if (pathname.startsWith('/sessions')) return { title: 'Sessions' };
+  if (pathname.startsWith('/settings')) return { title: 'Settings' };
+  if (pathname.startsWith('/new')) return { title: 'New Project', backTo: '/' };
+  return { title: '' };
+}
 
 const layoutStyle: CSSProperties = {
   display: 'flex',
@@ -23,6 +35,7 @@ const bodyStyle: CSSProperties = {
   display: 'flex',
   flex: 1,
   minHeight: 0,
+  maxHeight: 'calc(100dvh - var(--bo-header-height))',
 };
 
 const mainArea: CSSProperties = {
@@ -30,12 +43,6 @@ const mainArea: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   minWidth: 0,
-  maxHeight: 'calc(100dvh - var(--bo-header-height))',
-};
-
-const workspaceStyle: CSSProperties = {
-  flex: 1,
-  display: 'flex',
   overflow: 'hidden',
 };
 
@@ -45,22 +52,12 @@ const contentStyle: CSSProperties = {
   padding: 'var(--bo-space-5)',
 };
 
-const previewPanelStyle: CSSProperties = {
-  width: '320px',
-  flexShrink: 0,
-  borderLeft: '1px solid var(--bo-border)',
-  background: 'var(--bo-bg-surface)',
-  display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-};
-
 const iconBtn: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: '36px',
-  height: '36px',
+  width: '34px',
+  height: '34px',
   borderRadius: 'var(--bo-radius-md)',
   color: 'var(--bo-text-secondary)',
   background: 'none',
@@ -71,11 +68,19 @@ const iconBtn: CSSProperties = {
 
 const channelPill: CSSProperties = {
   display: 'flex', alignItems: 'center', gap: '4px',
-  padding: '4px 10px', borderRadius: 'var(--bo-radius-sm)',
+  padding: '3px 8px', borderRadius: 'var(--bo-radius-sm)',
   background: 'var(--bo-accent-bg)',
   color: 'var(--bo-accent)',
   fontSize: 'var(--bo-text-xs)', fontWeight: 500,
   whiteSpace: 'nowrap',
+};
+
+const productNameStyle: CSSProperties = {
+  fontSize: 'var(--bo-text-base)',
+  fontWeight: 700,
+  color: 'var(--bo-text)',
+  letterSpacing: '-0.3px',
+  marginRight: 'var(--bo-space-3)',
 };
 
 export function getTheme(): 'light' | 'dark' {
@@ -86,12 +91,21 @@ export function getTheme(): 'light' | 'dark' {
 
 interface AppShellProps {
   children: ReactNode;
-  previewPanel?: ReactNode;
 }
 
-export function AppShell({ children, previewPanel }: AppShellProps) {
+export function AppShell({ children }: AppShellProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [pageTitle, setPageTitleState] = useState<PageTitleValue>({ title: '' });
+  const location = useLocation();
+
+  useEffect(() => {
+    setPageTitleState(getRouteMeta(location.pathname));
+  }, [location.pathname]);
+
+  const setPageTitle = useCallback((t: PageTitleValue) => {
+    setPageTitleState(t);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -106,19 +120,29 @@ export function AppShell({ children, previewPanel }: AppShellProps) {
 
   const toggleTheme = () => setTheme((t) => (t === 'light' ? 'dark' : 'light'));
 
+  const ctxValue = useMemo(() => ({ pageTitle, setPageTitle }), [pageTitle, setPageTitle]);
+
+  const topBarActions = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--bo-space-1)' }}>
+      <span style={channelPill}><Smartphone size={11} /> WhatsApp + Web</span>
+      <button style={iconBtn} onClick={toggleTheme} aria-label="Toggle theme">
+        {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+      </button>
+    </div>
+  );
+
+  const productName = (
+    <span style={productNameStyle}>BrickOps</span>
+  );
+
   const renderMobile = () => (
     <>
       <TopAppBar
-        actions={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--bo-space-1)' }}>
-            <span style={channelPill}><Smartphone size={12} /> + Web</span>
-            <button style={iconBtn} onClick={toggleTheme} aria-label="Toggle theme">
-              {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-            </button>
-          </div>
-        }
+        backTo={pageTitle.backTo}
+        subtitle={pageTitle.backTo ? pageTitle.title : undefined}
+        actions={topBarActions}
       />
-      <div style={{ flex: 1, overflow: 'auto' }}>{children}</div>
+      <div style={{ flex: 1, overflow: 'auto', paddingBottom: 'var(--bo-bottom-nav-height)' }}>{children}</div>
       <NavigationBar items={navItems} />
     </>
   );
@@ -126,30 +150,25 @@ export function AppShell({ children, previewPanel }: AppShellProps) {
   const renderDesktop = () => (
     <>
       <TopAppBar
-        actions={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--bo-space-1)' }}>
-            <span style={channelPill}><Smartphone size={12} /> WhatsApp + Web</span>
-            <button style={iconBtn} onClick={toggleTheme} aria-label="Toggle theme">
-              {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-            </button>
-          </div>
-        }
+        backTo={pageTitle.backTo}
+        subtitle={pageTitle.backTo ? pageTitle.title : undefined}
+        center={pageTitle.backTo ? undefined : productName}
+        actions={topBarActions}
       />
       <div style={bodyStyle}>
         <NavigationRail items={navItems} />
         <div style={mainArea}>
-          <div style={workspaceStyle}>
-            <div style={contentStyle}>{children}</div>
-            {previewPanel && <div style={previewPanelStyle}>{previewPanel}</div>}
-          </div>
+          <div style={contentStyle}>{children}</div>
         </div>
       </div>
     </>
   );
 
   return (
-    <div style={layoutStyle}>
-      {isMobile ? renderMobile() : renderDesktop()}
-    </div>
+    <PageTitleContext.Provider value={ctxValue}>
+      <div style={layoutStyle}>
+        {isMobile ? renderMobile() : renderDesktop()}
+      </div>
+    </PageTitleContext.Provider>
   );
 }

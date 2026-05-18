@@ -100,6 +100,13 @@ export class MessageService {
     this.update(msg);
   }
 
+  appendReasoningDelta(sessionId: string, messageId: string, delta: string): void {
+    const msg = this.get(sessionId, messageId);
+    if (!msg) return;
+    msg.reasoningContent = (msg.reasoningContent || '') + delta;
+    this.update(msg);
+  }
+
   clear(sessionId: string): void {
     this.messages.delete(sessionId);
   }

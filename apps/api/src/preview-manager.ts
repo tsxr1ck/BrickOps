@@ -7,7 +7,7 @@ import fs from 'fs/promises';
  *
  * Manages local preview servers for each project.
  * Each project gets its own static file server on a unique port.
- * Also handles screenshot capture using Playwright + system Chrome.
+ * Also handles screenshot capture using Puppeteer + system Chrome.
  */
 
 const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || path.join(process.env.HOME || '~', '.brickops', 'workspaces');
@@ -171,7 +171,16 @@ export async function captureScreenshot(
   console.log(`[preview] Attempting screenshot with Puppeteer for ${url}...`);
 
   try {
-    const puppeteer = require('puppeteer');
+    // Dynamic import for Puppeteer (optional dependency)
+    const puppeteer = await import('puppeteer').then(m => m.default || m).catch(() => {
+      console.warn('[preview] Puppeteer not available, using placeholder screenshot');
+      return null;
+    });
+
+    if (!puppeteer) {
+      return generatePlaceholderScreenshot(url, width, height);
+    }
+
     console.log('[preview] Puppeteer loaded, launching Chromium...');
 
     const browser = await puppeteer.launch({
@@ -201,7 +210,7 @@ export async function captureScreenshot(
 }
 
 /**
- * Generate a placeholder screenshot when Playwright is not available.
+ * Generate a placeholder screenshot when Puppeteer is not available.
  */
 function generatePlaceholderScreenshot(url: string, width: number, height: number): Buffer {
   // Simple SVG placeholder

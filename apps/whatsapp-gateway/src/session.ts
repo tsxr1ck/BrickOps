@@ -39,9 +39,7 @@ const AUTH_DIR =
 let socket: ReturnType<typeof makeWASocket> | null = null;
 let currentState: ConnectionState = 'disconnected';
 let reconnectAttempts = 0;
-let openedAt: number | null = null;
 const MAX_RECONNECT_ATTEMPTS = 10;
-const MIN_CONNECTED_MS = 15_000;
 
 /**
  * Initialize and connect the WhatsApp session.
@@ -73,7 +71,7 @@ export async function createSession(events: SessionEvents): Promise<void> {
     auth: state,
     printQRInTerminal: true,
     browser: ['BrickOps', 'Server', '1.0.0'],
-    defaultQueryTimeoutMs: 180_000,
+    defaultQueryTimeoutMs: 300_000,
     // Quiet Baileys logs
     logger: {
       level: 'silent',
@@ -100,8 +98,29 @@ export async function createSession(events: SessionEvents): Promise<void> {
       currentState = 'disconnected';
       events.onConnectionUpdate('disconnected');
 
-      const reason = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const isLoggedOut = reason === DisconnectReason.loggedOut;
+      // Log the actual error details from lastDisconnect
+      const boom = lastDisconnect?.error as Boom | undefined;
+      const reasonCode = boom?.output?.statusCode;
+      const isLoggedOut = reasonCode === DisconnectReason.loggedOut;
+      const errorPayload = boom?.data ? JSON.stringify(boom.data).slice(0, 500) : null;
+      console.log(
+        `[whatsapp] Disconnected: statusCode=${reasonCode}, isLoggedOut=${isLoggedOut}` +
+        (errorPayload ? `, error=${errorPayload}` : '') +
+        (boom?.message ? `, message=${boom.message}` : '')
+      );
+
+      // Detect session conflict (another active session with same creds)
+      const isConflict = errorPayload?.includes('"conflict"') || reasonCode === 440;
+      if (isConflict) {
+        console.warn('[whatsapp] Session conflict detected — another session is using the same credentials');
+        console.warn('[whatsapp] Clearing auth to force fresh QR pairing...');
+        try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch {}
+        setTimeout(() => {
+          reconnectAttempts = 0;
+          createSession(events);
+        }, 5000);
+        return;
+      }
 
       if (isLoggedOut) {
         console.log('[whatsapp] Logged out — clearing auth and stopping');
@@ -109,17 +128,16 @@ export async function createSession(events: SessionEvents): Promise<void> {
         return;
       }
 
-      // Reconnect: constant short delay for transient failures, exponential backoff for sustained
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
-        const wasTransient = openedAt !== null && (Date.now() - openedAt) < MIN_CONNECTED_MS;
-        const delay = wasTransient ? 2000 : Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        const delay = Math.min(3000 * Math.pow(2, reconnectAttempts - 1), 60000);
         console.log(
           `[whatsapp] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
         );
         setTimeout(() => createSession(events), delay);
       } else {
         console.error('[whatsapp] Max reconnect attempts reached — consider deleting auth and re-pairing');
+        console.error('[whatsapp] Run: rm -rf ~/.brickops/whatsapp-auth && restart');
       }
     }
 
@@ -131,14 +149,7 @@ export async function createSession(events: SessionEvents): Promise<void> {
 
     if (connection === 'open') {
       currentState = 'open';
-      openedAt = Date.now();
-      // Only reset the counter if we stay connected for a minimum time
-      // This prevents infinite reconnects when init queries time out immediately
-      setTimeout(() => {
-        if (currentState === 'open') {
-          reconnectAttempts = 0;
-        }
-      }, MIN_CONNECTED_MS);
+      reconnectAttempts = 0;
       events.onConnectionUpdate('open');
       console.log('[whatsapp] Connected ✓');
     }

@@ -3,6 +3,7 @@ import { prisma } from '@brickops/db';
 import { FileSystemSandbox } from '@brickops/execution';
 import type { Action, ParallelTask } from '@brickops/contracts';
 import { executor } from '../executor';
+import { bus } from '@brickops/events';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -380,6 +381,11 @@ async function processPlan(
   const sandbox = new FileSystemSandbox(workspacePath);
 
   for (const task of plan.tasks) {
+    const ts = Date.now();
+    const runId = plan.runId;
+
+    emitBus({ type: 'tool_started', sessionId: `pipeline-${plan.projectId}`, runId, toolName: 'file-writer', toolCallId: task.id, input: { filePath: task.filePath, intent: task.intent }, timestamp: ts });
+
     await prisma.editTask.update({
       where: { id: task.id },
       data: { status: 'in_progress' },
@@ -403,17 +409,24 @@ async function processPlan(
           }
         }
 
+        // Fs. read is not a tool but we can emit a file_read event
+        if (fileContent && fileContent !== '// New File') {
+          emitBus({ type: 'file_read', sessionId: `pipeline-${plan.projectId}`, runId, filePath: task.filePath, timestamp: Date.now() });
+        }
+
         // Invoke developer agent with isolated context
         const action = await executeEditTask(task.filePath, task.intent, fileContent, task.isNewFile);
 
         // Apply action to sandbox
-        await applyAction(sandbox, action);
+        await applyAction(sandbox, action, plan.projectId, runId);
 
         // Mark completed
         await prisma.editTask.update({
           where: { id: task.id },
           data: { status: 'completed', errorLog: null },
         });
+
+        emitBus({ type: 'tool_finished', sessionId: `pipeline-${plan.projectId}`, runId, toolName: 'file-writer', toolCallId: task.id, result: `Created/updated ${task.filePath}`, isError: false, timestamp: Date.now() });
 
         completed++;
         break;
@@ -536,19 +549,29 @@ Return JSON only. Use patch_file with search/replace or create_file for rewrites
 /**
  * Apply a single action to the file system sandbox.
  */
-async function applyAction(sandbox: FileSystemSandbox, action: Action): Promise<void> {
+function emitBus(event: Record<string, unknown>): void {
+  try { bus.emit(event as any); } catch {}
+}
+
+async function applyAction(sandbox: FileSystemSandbox, action: Action, projectId?: string, runId?: string): Promise<void> {
+  const ts = Date.now();
+  const sessionId = projectId ? `pipeline-${projectId}` : 'pipeline';
+
   switch (action.action) {
     case 'create_file':
       await sandbox.createFile(action.path, action.content);
       console.log(`[coding] Created: ${action.path}`);
+      emitBus({ type: 'file_written', sessionId, runId: runId || sessionId, filePath: action.path, timestamp: ts });
       break;
     case 'patch_file':
       await sandbox.patchFile(action.path, action.search, action.replace);
       console.log(`[coding] Patched: ${action.path}`);
+      emitBus({ type: 'diff_applied', sessionId, runId: runId || sessionId, filePath: action.path, timestamp: ts });
       break;
     case 'delete_file':
       await sandbox.deleteFile(action.path);
       console.log(`[coding] Deleted: ${action.path}`);
+      emitBus({ type: 'file_written', sessionId, runId: runId || sessionId, filePath: action.path, timestamp: ts });
       break;
   }
 }
@@ -613,13 +636,19 @@ Respond with a JSON array of actions.`,
       const actions: Action[] = Array.isArray(response.parsedJson) ? response.parsedJson : [];
 
       let executed = 0;
+      const runId = ctx.runId;
+      const sessionId = `pipeline-${ctx.projectId}`;
       for (const action of actions) {
+        const aid = `${task.agentRole}-${index}-${executed}`;
+        emitBus({ type: 'tool_started', sessionId, runId, toolName: task.agentRole, toolCallId: aid, input: { filePath: (action as any).path }, timestamp: Date.now() });
         try {
-          await applyAction(sandbox, action);
+          await applyAction(sandbox, action, ctx.projectId, runId);
           console.log(`[coding:${task.agentRole}] Applied: ${(action as any).path}`);
+          emitBus({ type: 'tool_finished', sessionId, runId, toolName: task.agentRole, toolCallId: aid, result: `Applied ${(action as any).path}`, isError: false, timestamp: Date.now() });
           executed++;
         } catch (err: any) {
           console.warn(`[coding:${task.agentRole}] Action failed for ${(action as any).path}: ${err.message}`);
+          emitBus({ type: 'tool_finished', sessionId, runId, toolName: task.agentRole, toolCallId: aid, result: err.message, isError: true, timestamp: Date.now() });
         }
       }
 

@@ -1,0 +1,1 @@
+cd /Users/rick/dev/byrick.net/BrickOps/apps/api && bun run dev 2>&1

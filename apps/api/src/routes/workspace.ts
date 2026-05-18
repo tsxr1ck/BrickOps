@@ -88,6 +88,58 @@ workspaceRoutes.get('/:id/preview', async (c) => {
   }
 });
 
+// --- Preview management (MUST come before preview/* wildcard) ---
+
+/**
+ * Start a local preview server for a project.
+ */
+workspaceRoutes.post('/:id/preview/start', async (c) => {
+  const { id } = c.req.param();
+  const project = await prisma.project.findUnique({ where: { id } });
+  if (!project) return c.json({ error: 'Project not found' }, 404);
+
+  try {
+    const result = await startPreview(id);
+    return c.json({ ok: true, ...result });
+  } catch (err: any) {
+    return c.json({ error: `Failed to start preview: ${err.message}` }, 500);
+  }
+});
+
+/**
+ * Stop the preview server for a project.
+ */
+workspaceRoutes.post('/:id/preview/stop', async (c) => {
+  const { id } = c.req.param();
+  try {
+    
+    await stopPreview(id);
+    return c.json({ ok: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+/**
+ * Get preview status for a project.
+ */
+workspaceRoutes.get('/:id/preview/status', async (c) => {
+  const { id } = c.req.param();
+  
+  const preview = getPreview(id);
+
+  if (!preview) {
+    return c.json({ running: false });
+  }
+
+  return c.json({
+    running: true,
+    port: preview.port,
+    url: preview.url,
+    startedAt: preview.startedAt,
+  });
+});
+
 /**
  * Serve static assets from dist/.
  */
@@ -317,59 +369,6 @@ function generateNginxConfig(slug: string, deployPath: string, domain: string): 
 }
 `;
 }
-
-// --- Preview Server Endpoints ---
-
-/**
- * Start a local preview server for a project.
- * Returns the local URL where the preview is running.
- */
-workspaceRoutes.post('/:id/preview/start', async (c) => {
-  const { id } = c.req.param();
-  const project = await prisma.project.findUnique({ where: { id } });
-  if (!project) return c.json({ error: 'Project not found' }, 404);
-
-  try {
-    const result = await startPreview(id);
-    return c.json({ ok: true, ...result });
-  } catch (err: any) {
-    return c.json({ error: `Failed to start preview: ${err.message}` }, 500);
-  }
-});
-
-/**
- * Stop the preview server for a project.
- */
-workspaceRoutes.post('/:id/preview/stop', async (c) => {
-  const { id } = c.req.param();
-  try {
-    
-    await stopPreview(id);
-    return c.json({ ok: true });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-/**
- * Get preview status for a project.
- */
-workspaceRoutes.get('/:id/preview/status', async (c) => {
-  const { id } = c.req.param();
-  
-  const preview = getPreview(id);
-
-  if (!preview) {
-    return c.json({ running: false });
-  }
-
-  return c.json({
-    running: true,
-    port: preview.port,
-    url: preview.url,
-    startedAt: preview.startedAt,
-  });
-});
 
 /**
  * List all active preview servers.

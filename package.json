@@ -19,6 +19,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\""
   },
   "devDependencies": {
+    "@types/react": "^19.2.14",
     "prettier": "^3.0.0",
     "typescript": "^5.0.0"
   },

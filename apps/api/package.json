@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "hono": "^4.0.0",
+    "@brickops/agent-runtime": "workspace:*",
     "@brickops/contracts": "workspace:*",
     "@brickops/db": "workspace:*",
     "@brickops/events": "workspace:*",
@@ -17,5 +18,8 @@
   },
   "devDependencies": {
     "@types/bun": "latest"
+  },
+  "optionalDependencies": {
+    "puppeteer": "^22.0.0"
   }
 }

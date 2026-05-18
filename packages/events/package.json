@@ -1,8 +1,6 @@
 {
   "name": "@brickops/events",
   "version": "1.0.0",
-  "main": "src/index.ts",
-  "dependencies": {
-    "@brickops/contracts": "workspace:*"
-  }
+  "main": "index.ts",
+  "types": "index.ts"
 }

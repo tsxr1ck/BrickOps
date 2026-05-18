@@ -129,6 +129,113 @@ export interface PlanGeneratedEvent {
   timestamp: number;
 }
 
+// ── Phase 1: Agent loop granular events ──
+
+export interface SessionRunStartedEvent {
+  type: 'session.run_started';
+  sessionId: string;
+  projectId: string;
+  runId: string;
+  prompt: string;
+  timestamp: number;
+}
+
+export interface LLMThinkingDeltaEvent {
+  type: 'llm_thinking_delta';
+  sessionId: string;
+  runId: string;
+  content: string;
+  timestamp: number;
+}
+
+export interface LLMContentDeltaEvent {
+  type: 'llm_content_delta';
+  sessionId: string;
+  runId: string;
+  content: string;
+  timestamp: number;
+}
+
+export interface ToolStartedEvent {
+  type: 'tool_started';
+  sessionId: string;
+  runId: string;
+  toolName: string;
+  toolCallId: string;
+  input: Record<string, unknown>;
+  timestamp: number;
+}
+
+export interface ToolFinishedEvent {
+  type: 'tool_finished';
+  sessionId: string;
+  runId: string;
+  toolName: string;
+  toolCallId: string;
+  result: string;
+  isError: boolean;
+  timestamp: number;
+}
+
+export interface FileWrittenEvent {
+  type: 'file_written';
+  sessionId: string;
+  runId: string;
+  filePath: string;
+  timestamp: number;
+}
+
+export interface FileReadEvent {
+  type: 'file_read';
+  sessionId: string;
+  runId: string;
+  filePath: string;
+  timestamp: number;
+}
+
+export interface DiffAppliedEvent {
+  type: 'diff_applied';
+  sessionId: string;
+  runId: string;
+  filePath: string;
+  timestamp: number;
+}
+
+export interface TestsStartedEvent {
+  type: 'tests_started';
+  sessionId: string;
+  runId: string;
+  command: string;
+  timestamp: number;
+}
+
+export interface TestsFinishedEvent {
+  type: 'tests_finished';
+  sessionId: string;
+  runId: string;
+  passed: number;
+  failed: number;
+  output: string;
+  timestamp: number;
+}
+
+export interface SessionErrorEvent {
+  type: 'session.error';
+  sessionId: string;
+  runId: string;
+  message: string;
+  timestamp: number;
+}
+
+export interface SessionRunCompletedEvent {
+  type: 'session.run_completed';
+  sessionId: string;
+  projectId: string;
+  runId: string;
+  summary: string;
+  timestamp: number;
+}
+
 export interface BuildCompletedEvent {
   type: 'build.completed';
   projectId: string;
@@ -154,7 +261,19 @@ export type SystemEvent =
   | ClarificationRequestedEvent
   | ClarificationAnsweredEvent
   | PlanGeneratedEvent
-  | BuildCompletedEvent;
+  | BuildCompletedEvent
+  | SessionRunStartedEvent
+  | LLMThinkingDeltaEvent
+  | LLMContentDeltaEvent
+  | ToolStartedEvent
+  | ToolFinishedEvent
+  | FileWrittenEvent
+  | FileReadEvent
+  | DiffAppliedEvent
+  | TestsStartedEvent
+  | TestsFinishedEvent
+  | SessionErrorEvent
+  | SessionRunCompletedEvent;
 
 /** Extract the event type string literals for type-safe subscriptions. */
 export type SystemEventType = SystemEvent['type'];

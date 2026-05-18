@@ -1,7 +1,47 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+*.tsbuildinfo.*
+
+# Compiled JS (TypeScript output alongside source)
+apps/*/src/**/*.js
+apps/*/*.js
+packages/*/src/**/*.js
+packages/*/**/*.js
+scripts/*.js
+
+# Exceptions — these are source JS config files that don't have .ts versions
+!apps/web/eslint.config.js
+
+# Environment
 .env
 .env.local
+.env.*.local
+
+# Generated workspaces (project scaffolding output)
+workspaces/
+
+# IDE and OS
 .DS_Store
-coverage
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+
+# Turbo repo cache
 .turbo
+
+# Temp / stray files
+tmp/
+temp/
+*.log
+check_cwd.txt
+test.txt
+test_bun.ts

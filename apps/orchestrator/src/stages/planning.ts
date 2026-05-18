@@ -1,20 +1,7 @@
 import type { PipelineContext } from '../pipeline';
 import { prisma } from '@brickops/db';
 import { executor } from '../executor';
-
-const GATEWAY_URL = process.env.BRICKOPS_GATEWAY_URL || 'http://localhost:3002';
-
-async function sendWhatsApp(recipientJid: string, message: string): Promise<void> {
-  try {
-    await fetch(`${GATEWAY_URL}/outbound`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientJid, message }),
-    });
-  } catch (err) {
-    console.error('[planning] Failed to send WhatsApp:', err);
-  }
-}
+import { deliverWhatsApp } from '@brickops/notifications';
 
 /**
  * Planning stage — Project Manager.
@@ -164,7 +151,7 @@ CRITICAL RULES:
         const { templates } = await import('@brickops/notifications');
         const planInfo = extractPlanInfo(plan);
         const summaryMsg = templates.planSummary(project, planInfo);
-        await sendWhatsApp(operatorJid, summaryMsg);
+        await deliverWhatsApp(undefined, operatorJid, summaryMsg, 'plan_summary', ctx.projectId);
       } catch (err) {
         console.error('[planning] Failed to send plan summary:', err);
       }

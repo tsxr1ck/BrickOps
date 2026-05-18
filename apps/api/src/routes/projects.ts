@@ -81,6 +81,30 @@ projectRoutes.get('/:slugOrId', async (c) => {
   return c.json(project);
 });
 
+// --- Get or create current session for a project ---
+projectRoutes.get('/:slugOrId/current-session', async (c) => {
+  const { slugOrId } = c.req.param();
+
+  const project = await prisma.project.findFirst({
+    where: { OR: [{ slug: slugOrId }, { id: slugOrId }] },
+  });
+  if (!project) return c.json({ error: 'Project not found' }, 404);
+
+  // Find the most recent session
+  let session = await prisma.session.findFirst({
+    where: { projectId: project.id },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  if (!session) {
+    session = await prisma.session.create({
+      data: { projectId: project.id, source: 'web' },
+    });
+  }
+
+  return c.json({ id: session.id });
+});
+
 // --- Create project ---
 projectRoutes.post('/', async (c) => {
   const body = await c.req.json();
@@ -173,6 +197,39 @@ projectRoutes.post('/:id/threads', async (c) => {
       },
     });
     return c.json(thread, 201);
+  } catch (err: any) {
+    if (err.code === 'P2003') {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+    throw err;
+  }
+});
+
+// --- Submit clarification answers (web UI) ---
+projectRoutes.post('/:id/clarify', async (c) => {
+  const { id } = c.req.param();
+  const body = await c.req.json<{ answers: string[] }>();
+
+  if (!body.answers || !Array.isArray(body.answers) || body.answers.length === 0) {
+    return c.json({ error: 'answers array is required' }, 400);
+  }
+
+  try {
+    const answers = body.answers.filter(a => a.trim());
+    for (const answer of answers) {
+      await prisma.projectThread.create({
+        data: { projectId: id, role: 'user', content: answer.trim() },
+      });
+    }
+
+    bus.emit({
+      type: 'clarification.answered',
+      projectId: id,
+      answers,
+      timestamp: Date.now(),
+    });
+
+    return c.json({ ok: true, message: 'Clarification answers submitted' }, 200);
   } catch (err: any) {
     if (err.code === 'P2003') {
       return c.json({ error: 'Project not found' }, 404);

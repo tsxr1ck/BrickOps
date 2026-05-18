@@ -28,7 +28,7 @@ type OperatorResolver = () => Promise<string | null>;
 
 const GATEWAY_URL = process.env.BRICKOPS_GATEWAY_URL || 'http://localhost:3002';
 
-async function deliverWhatsApp(
+export async function deliverWhatsApp(
   gatewayUrl: string | undefined,
   recipientJid: string,
   message: string,
@@ -47,7 +47,7 @@ async function deliverWhatsApp(
   }
 }
 
-async function deliverWhatsAppDocument(
+export async function deliverWhatsAppDocument(
   gatewayUrl: string | undefined,
   recipientJid: string,
   buffer: Buffer,

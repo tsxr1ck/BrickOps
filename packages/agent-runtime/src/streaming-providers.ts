@@ -174,10 +174,7 @@ export class OpenAIStreamingProvider implements Provider {
       },
       body: JSON.stringify({
         model: this.modelId,
-        messages: messages.map((m) => ({
-          role: m.role,
-          content: serializeMessageContent(m),
-        })),
+        messages: messages.flatMap((m) => formatMessage(m)),
         stream: true,
         stream_options: { include_usage: true },
         ...(tools && tools.length > 0
@@ -196,7 +193,7 @@ export class OpenAIStreamingProvider implements Provider {
             }
           : {}),
       }),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(300000),
     });
 
     if (!response.ok) {
@@ -228,10 +225,7 @@ export class OpenAIStreamingProvider implements Provider {
       },
       body: JSON.stringify({
         model: this.modelId,
-        messages: messages.map((m) => ({
-          role: m.role,
-          content: serializeMessageContent(m),
-        })),
+        messages: messages.flatMap((m) => formatMessage(m)),
         ...(tools && tools.length > 0
           ? {
               tools: tools.map((t) => {
@@ -248,7 +242,7 @@ export class OpenAIStreamingProvider implements Provider {
             }
           : {}),
       }),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(300000),
     });
 
     if (!response.ok) {
@@ -282,27 +276,55 @@ export class OpenAIStreamingProvider implements Provider {
   }
 }
 
-function serializeMessageContent(msg: Message): string | any[] {
+/**
+ * Format a message for the OpenAI-compatible API.
+ *
+ * For `role: "tool"`, expands each `tool_result` part into a separate
+ * API message (DeepSeek requires one `role: "tool"` per `tool_call_id`).
+ *
+ * For `role: "assistant"` with `toolCalls`, includes the `tool_calls` at
+ * the message level (required before tool results).
+ *
+ * For all other roles, content is a plain string (text parts joined).
+ */
+function formatMessage(msg: Message): Record<string, unknown>[] {
   const textParts = msg.parts
     .filter((p) => p.type === 'text')
     .map((p) => (p as any).text)
     .join('');
 
-  const toolResults = msg.parts
-    .filter((p) => p.type === 'tool_result')
-    .map((p: any) => ({
-      type: 'tool_result',
-      tool_call_id: p.toolCallId,
-      content: p.content,
-      is_error: p.isError,
-    }));
+  const toolResults = msg.parts.filter((p) => p.type === 'tool_result') as any[];
 
-  if (toolResults.length > 0) {
-    const result: any[] = [];
-    if (textParts) result.push({ type: 'text', text: textParts });
-    result.push(...toolResults);
-    return result;
+  if (msg.role === 'tool' && toolResults.length > 0) {
+    return toolResults.map((tr) => ({
+      role: 'tool',
+      tool_call_id: tr.toolCallId,
+      content: tr.content || textParts,
+    }));
   }
 
-  return textParts;
+  const hasToolCalls = msg.toolCalls && msg.toolCalls.length > 0;
+
+  if (msg.role === 'assistant') {
+    const result: Record<string, unknown> = {
+      role: 'assistant',
+      content: textParts || null,
+    };
+    if (msg.reasoningContent) {
+      result.reasoning_content = msg.reasoningContent;
+    }
+    if (hasToolCalls) {
+      result.tool_calls = msg.toolCalls!.map((tc) => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: {
+          name: tc.name,
+          arguments: JSON.stringify(tc.input),
+        },
+      }));
+    }
+    return [result];
+  }
+
+  return [{ role: msg.role, content: textParts }];
 }

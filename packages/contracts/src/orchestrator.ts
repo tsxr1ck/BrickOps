@@ -14,6 +14,7 @@ export const PROJECT_STATUSES = [
   'awaiting_plan_approval',
   'provisioning_workspace',
   'indexing_workspace',
+  'scaffolding',
   'routing_task',
   'coding',
   'reviewing',
@@ -38,6 +39,7 @@ export const ACTIVE_STATES: readonly ProjectStatus[] = [
   'planning',
   'provisioning_workspace',
   'indexing_workspace',
+  'scaffolding',
   'routing_task',
   'coding',
   'reviewing',
@@ -104,10 +106,13 @@ export interface ProjectPlan {
 
 export type SSEEventType =
   | 'run.step'
+  | 'project.created'
+  | 'project.updated'
   | 'project.update'
   | 'approval.new'
   | 'approval.resolved'
   | 'notification'
+  | 'session.run'
   | 'heartbeat';
 
 export interface SSEEvent {

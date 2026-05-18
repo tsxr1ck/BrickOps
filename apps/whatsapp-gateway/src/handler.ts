@@ -9,7 +9,10 @@ import {
   selectProject,
   getSelectedProject,
   clearSelectedProject,
+  setActiveSession,
+  getSessionForProject,
 } from './conversation-state';
+import { startEventListener } from './event-listener';
 
 /**
  * Operator whitelist. Only the configured operator phone can issue commands.
@@ -241,14 +244,13 @@ export async function handleIntent(
       const messageText = intent.type === 'chat' ? intent.message : intent.rawText;
       console.log(`[whatsapp:handler] ${intent.type === 'chat' ? 'Chat' : 'Unknown'}: ${messageText}`);
       
-      // If there's a selected project or only one project and the message sounds like a modification, treat as modify
+      // Check if message sounds like a modification request
       try {
         const selected = getSelectedProject(senderJid);
         const projects = await apiFetch<any[]>('/projects');
         const lower = messageText.toLowerCase();
         const isModifyIntent = /rework|update|fix|change|modify|improve|redesign|edit|add|remove|delete|redo|create/.test(lower);
         
-        // Use selected project if available, otherwise only auto-modify when exactly one project
         if (isModifyIntent) {
           let project: any = null;
           if (selected) {
@@ -258,17 +260,7 @@ export async function handleIntent(
           }
           
           if (project) {
-            await apiFetch(`/projects/${project.id}/threads`, {
-              method: 'POST',
-              body: JSON.stringify({ role: 'user', content: messageText }),
-            });
-            await apiFetch(`/projects/${project.id}/trigger`, { method: 'POST' });
-            
-            await sendReply(
-              senderJid,
-              `✏️ *Modifying ${project.name}*\n\nWorking on your request: ${messageText.slice(0, 100)}\n\nI'll notify you when the build is done.`,
-              messageId
-            );
+            await sessionRun(project, messageText, senderJid, messageId);
             break;
           }
         }
@@ -336,7 +328,6 @@ export async function handleIntent(
       console.log(`[whatsapp:handler] Modify project: ${query} — ${intent.request}`);
 
       try {
-        // Find the project by slug/name or use selected
         const projects = await apiFetch<any[]>('/projects');
         let project: any = null;
 
@@ -357,20 +348,8 @@ export async function handleIntent(
           break;
         }
 
-        // Store the modification request as a thread
-        await apiFetch(`/projects/${project.id}/threads`, {
-          method: 'POST',
-          body: JSON.stringify({ role: 'user', content: intent.request }),
-        });
-
-        // Trigger edit pipeline
-        await apiFetch(`/projects/${project.id}/trigger`, { method: 'POST' });
-
-        await sendReply(
-          senderJid,
-          `✏️ *Modification Requested*\nProject: ${project.name}\n\nRequest: ${intent.request}\n\nWorking on it — I'll let you know when it's done.`,
-          messageId
-        );
+        // Use session-based run
+        await sessionRun(project, intent.request, senderJid, messageId);
       } catch (err: any) {
         await sendReply(senderJid, `❌ Failed to process modification: ${err.message}`, messageId);
       }
@@ -452,6 +431,48 @@ async function handleClarificationAnswer(
 /**
  * Find an approval by project slug/name match or return the latest.
  */
+/**
+ * Run a prompt on a project's session.
+ * Creates or reuses a session, calls POST /sessions/:id/run, and
+ * starts an event listener for WhatsApp updates.
+ */
+async function sessionRun(project: any, prompt: string, senderJid: string, messageId: string): Promise<void> {
+  // Reuse existing session for this project or create a new one
+  let session = getSessionForProject(senderJid, project.id);
+  let sessionId: string;
+
+  if (session) {
+    sessionId = session.sessionId;
+  } else {
+    // Create a session via API
+    const created = await apiFetch<{ id: string }>('/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        source: 'whatsapp',
+        title: prompt.slice(0, 80),
+      }),
+    });
+    sessionId = created.id;
+    setActiveSession(senderJid, sessionId, project.id);
+  }
+
+  await sendReply(
+    senderJid,
+    `✏️ *Working on ${project.name}*\n\n${prompt.slice(0, 200)}\n\nI'll keep you updated as I go.`,
+    messageId
+  );
+
+  // Start the session run (fire-and-forget on the API side)
+  await apiFetch(`/sessions/${encodeURIComponent(sessionId)}/run`, {
+    method: 'POST',
+    body: JSON.stringify({ prompt, projectId: project.id }),
+  });
+
+  // Subscribe to SSE events for WhatsApp updates
+  startEventListener({ recipientJid: senderJid, sessionId, projectId: project.id });
+}
+
 function findApproval(approvals: any[], target: string): any | null {
   if (approvals.length === 0) return null;
 

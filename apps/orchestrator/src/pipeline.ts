@@ -1,23 +1,34 @@
 import { prisma } from "@brickops/db";
 import type { ProjectStatus } from "@brickops/contracts";
+import { deliverWhatsApp } from "@brickops/notifications";
+import { bus } from "@brickops/events";
 import { runIntake } from "./stages/intake";
 import { runPlanning } from "./stages/planning";
 import { runCoding, runParallelCoding } from "./stages/coding";
 import { runValidation } from "./stages/validate";
 import { runBuild } from "./stages/build";
+import { runScaffold } from "./stages/scaffold";
 
-const GATEWAY_URL = process.env.BRICKOPS_GATEWAY_URL || "http://localhost:3002";
-
-async function sendWhatsApp(recipientJid: string, message: string): Promise<void> {
-  if (!recipientJid) return;
-  try {
-    await fetch(`${GATEWAY_URL}/outbound`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recipientJid, message }),
-    });
-  } catch (err) {
-    console.error("[pipeline] WhatsApp send failed:", err);
+function log(level: string, msg: string, ctx?: Record<string, unknown>) {
+  const line = JSON.stringify({
+    time: new Date().toISOString(),
+    source: "pipeline",
+    level,
+    msg,
+    ...ctx,
+  });
+  switch (level) {
+    case "error":
+      console.error(line);
+      break;
+    case "warn":
+      console.warn(line);
+      break;
+    case "debug":
+      console.debug(line);
+      break;
+    default:
+      console.log(line);
   }
 }
 
@@ -29,7 +40,7 @@ async function sendWhatsAppDocument(
 ): Promise<void> {
   if (!recipientJid) return;
   try {
-    await fetch(`${GATEWAY_URL}/outbound-document`, {
+    await fetch(`${process.env.BRICKOPS_GATEWAY_URL || "http://localhost:3002"}/outbound-document`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -40,20 +51,20 @@ async function sendWhatsAppDocument(
       }),
     });
   } catch (err) {
-    console.error("[pipeline] WhatsApp document send failed:", err);
+    log("error", "WhatsApp document send failed", { error: String(err) });
   }
 }
 
 async function sendWhatsAppImage(recipientJid: string, buffer: Buffer, caption?: string): Promise<void> {
   if (!recipientJid) return;
   try {
-    await fetch(`${GATEWAY_URL}/outbound-image`, {
+    await fetch(`${process.env.BRICKOPS_GATEWAY_URL || "http://localhost:3002"}/outbound-image`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ recipientJid, buffer: Array.from(buffer), caption }),
     });
   } catch (err) {
-    console.error("[pipeline] WhatsApp image send failed:", err);
+    log("error", "WhatsApp image send failed", { error: String(err) });
   }
 }
 
@@ -91,7 +102,7 @@ async function captureAndSendScreenshot(projectId: string, runId: string): Promi
     }
 
     if (!previewUrl) {
-      console.warn('[pipeline] Could not start preview for screenshot');
+      log("warn", "Could not start preview for screenshot", { projectId, runId });
       return;
     }
 
@@ -108,7 +119,7 @@ async function captureAndSendScreenshot(projectId: string, runId: string): Promi
     });
     
     if (!ssRes.ok) {
-      console.warn('[pipeline] Screenshot API failed:', ssRes.status);
+      log("warn", "Screenshot API failed", { projectId, runId, status: ssRes.status });
       return;
     }
 
@@ -116,7 +127,7 @@ async function captureAndSendScreenshot(projectId: string, runId: string): Promi
     if (screenshotBuffer.length < 1000) return; // Too small, probably placeholder
 
     // Send via WhatsApp gateway (base64-encoded for JSON safety)
-    await fetch(`${GATEWAY_URL}/outbound-image`, {
+    await fetch(`${process.env.BRICKOPS_GATEWAY_URL || "http://localhost:3002"}/outbound-image`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -127,14 +138,15 @@ async function captureAndSendScreenshot(projectId: string, runId: string): Promi
       signal: AbortSignal.timeout(15000),
     });
 
-    console.log(`[pipeline] Screenshot sent to WhatsApp for ${project.name}`);
+    log("info", "Screenshot sent to WhatsApp", { projectId, runId, projectName: project.name });
   } catch (err: any) {
-    console.error('[pipeline] Screenshot flow failed:', err.message);
+    log("error", "Screenshot flow failed", { projectId, runId, error: err.message });
   }
 }
 
 const statusMessages: Record<string, string> = {
   planning: "\u{1F9D1}\u200D\u{1F4BB} Architect is analyzing the request...",
+  scaffolding: "\u{1F3D7}\uFE0F Scaffolding project structure...",
   coding: "\u{1F9D1}\u200D\u{1F4BB} Developer is generating the code...",
   reviewing: "\u{1F50D} Running TS compiler and validation...",
   installing: "\u{1F4E6} Installing dependencies...",
@@ -146,6 +158,13 @@ const statusMessages: Record<string, string> = {
 async function setStatus(projectId: string, status: ProjectStatus): Promise<void> {
   await prisma.project.update({ where: { id: projectId }, data: { status } });
 
+  bus.emit({
+    type: 'project.updated',
+    projectId,
+    status,
+    timestamp: Date.now(),
+  });
+
   const operatorJid = process.env.BRICKOPS_OPERATOR_JID;
   const userMessage = statusMessages[status];
 
@@ -156,7 +175,7 @@ async function setStatus(projectId: string, status: ProjectStatus): Promise<void
         select: { name: true },
       });
       if (project) {
-        sendWhatsApp(operatorJid, `*[${project.name}]* ${userMessage}`);
+        deliverWhatsApp(undefined, operatorJid, `*[${project.name}]* ${userMessage}`, 'status_change', projectId);
       }
     } catch {}
   }
@@ -194,6 +213,13 @@ async function createRun(
     },
   });
 
+  bus.emit({
+    type: 'run.started',
+    runId: run.id,
+    projectId,
+    timestamp: Date.now(),
+  });
+
   return { projectId, runId: run.id };
 }
 
@@ -220,7 +246,14 @@ async function createStep(
   });
 
   if (run) {
-    // Step change tracked in DB — no event bus needed for SSE
+    bus.emit({
+      type: 'run.step_changed',
+      runId,
+      projectId: run.projectId,
+      stepName: name,
+      stepStatus: status,
+      timestamp: Date.now(),
+    });
   }
 
   return step.id;
@@ -233,10 +266,26 @@ async function completeStep(
   stepId: string,
   status: "completed" | "failed" = "completed",
 ): Promise<void> {
-  await prisma.runStep.update({
+  const step = await prisma.runStep.update({
     where: { id: stepId },
     data: { status, endedAt: new Date() },
   });
+
+  const run = await prisma.run.findUnique({
+    where: { id: step.runId },
+    select: { projectId: true },
+  });
+
+  if (run) {
+    bus.emit({
+      type: 'run.step_changed',
+      runId: step.runId,
+      projectId: run.projectId,
+      stepName: step.name,
+      stepStatus: status,
+      timestamp: Date.now(),
+    });
+  }
 }
 
 /**
@@ -244,11 +293,11 @@ async function completeStep(
  * Handles intake and pauses if clarification questions exist.
  */
 export async function runPipeline(projectId: string): Promise<void> {
-  console.log(`[pipeline] Starting pipeline for project ${projectId}`);
+  log("info", "Starting pipeline", { projectId });
 
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) {
-    console.error(`[pipeline] Project ${projectId} not found`);
+    log("error", "Project not found", { projectId });
     return;
   }
 
@@ -259,21 +308,21 @@ export async function runPipeline(projectId: string): Promise<void> {
   });
 
   if (existingRun) {
-    console.log(`[pipeline] Edit run detected — skipping to coding`);
+    log("info", "Edit run detected — skipping to coding", { projectId });
     try {
-      console.log('[pipeline] Step 1: reset status');
+      log("info", "Step 1: reset status", { projectId });
       try { await prisma.project.update({ where: { id: projectId }, data: { status: 'ready_to_deploy' } }); } catch {}
       
-      console.log('[pipeline] Step 2: createRun');
+      log("info", "Step 2: createRun", { projectId });
       const ctx = await createRun(projectId, 'coding');
       
-      console.log('[pipeline] Step 3: safeTrans to coding');
-      try { await setStatus(projectId, 'coding'); } catch (e: any) { console.log('SafeTrans error:', e.message); }
+      log("info", "Step 3: safeTrans to coding", { projectId });
+      try { await setStatus(projectId, 'coding'); } catch (e: any) { log("warn", "SafeTrans error", { projectId, error: e.message }); }
       
-      console.log('[pipeline] Step 4: continueFromCoding');
+      log("info", "Step 4: continueFromCoding", { projectId, runId: ctx.runId });
       await continueFromCoding(ctx);
     } catch (err: any) {
-      console.error(`[pipeline] Edit run failed in step:`, err.message);
+      log("error", "Edit run failed in step", { projectId, error: err.message });
       try { await handlePipelineError(await createRun(projectId, 'failed'), projectId, err.message); } catch {}
     }
     return;
@@ -313,7 +362,7 @@ export async function runPipeline(projectId: string): Promise<void> {
     if (hasQuestions) {
       // Transition to awaiting_clarification and pause
       await setStatus(projectId, "awaiting_clarification");
-      console.log(`[pipeline] Paused — awaiting clarification for project ${projectId}`);
+      log("info", "Paused — awaiting clarification", { projectId, runId: ctx.runId });
 
       // Store the run context for later continuation
       await prisma.projectThread.create({
@@ -334,10 +383,7 @@ export async function runPipeline(projectId: string): Promise<void> {
     // No questions needed — continue directly to planning
     await continueFromPlanning(ctx);
   } catch (error: any) {
-    console.error(
-      `[pipeline] Pipeline failed for project ${projectId}:`,
-      error.message,
-    );
+    log("error", "Pipeline failed", { projectId, runId: ctx.runId, error: error.message });
     await handlePipelineError(ctx, projectId, error.message);
   }
 }
@@ -347,7 +393,7 @@ export async function runPipeline(projectId: string): Promise<void> {
  * Resumes from the planning stage.
  */
 export async function continuePipeline(projectId: string): Promise<void> {
-  console.log(`[pipeline] Continuing pipeline for project ${projectId} after clarification`);
+  log("info", "Continuing pipeline after clarification", { projectId });
 
   // Find the existing run
   const pauseThread = await prisma.projectThread.findFirst({
@@ -381,10 +427,7 @@ export async function continuePipeline(projectId: string): Promise<void> {
     await setStatus(projectId, "planning");
     await continueFromPlanning(ctx);
   } catch (error: any) {
-    console.error(
-      `[pipeline] Pipeline continuation failed for project ${projectId}:`,
-      error.message,
-    );
+    log("error", "Pipeline continuation failed", { projectId, runId: ctx.runId, error: error.message });
     await handlePipelineError(ctx, projectId, error.message);
   }
 }
@@ -394,11 +437,11 @@ export async function continuePipeline(projectId: string): Promise<void> {
  */
 async function continueFromCoding(ctx: PipelineContext): Promise<void> {
   const { projectId, runId } = ctx;
-  console.log(`[pipeline] continueFromCoding starting for ${projectId}`);
+  log("info", "continueFromCoding starting", { projectId, runId });
 
   // Provision workspace if needed
   const existingProject = await prisma.project.findUnique({ where: { id: projectId } });
-  console.log(`[pipeline] Project found, workspace: ${existingProject?.workspacePath}`);
+  log("info", "Project found", { projectId, runId, workspacePath: existingProject?.workspacePath });
   
   if (!existingProject?.workspacePath) {
     const { WorkspaceManager } = await import("@brickops/execution");
@@ -410,13 +453,22 @@ async function continueFromCoding(ctx: PipelineContext): Promise<void> {
     ctx.workspacePath = existingProject.workspacePath;
   }
 
+  // ---- Scaffold (ensure baseline files exist) ----
+  const scaffoldStepId = await createStep(runId, "Project scaffolding");
+  try {
+    await runScaffold(ctx);
+  } catch (err: any) {
+    log("warn", "Scaffold failed (non-fatal)", { projectId, runId, error: err.message });
+  }
+  await completeStep(scaffoldStepId);
+
   // ---- Coding ----
-  console.log(`[pipeline] Running coding stage...`);
+  log("info", "Running coding stage", { projectId, runId });
   const codeStepId = await createStep(runId, "Code generation (edit)");
   try {
     await runCoding(ctx);
   } catch (err: any) {
-    console.error(`[pipeline] Coding failed: ${err.message}`);
+    log("error", "Coding failed", { projectId, runId, error: err.message });
   }
   await completeStep(codeStepId);
 
@@ -436,7 +488,7 @@ async function continueFromCoding(ctx: PipelineContext): Promise<void> {
     }
 
     if (result.compilerErrors && attempt < MAX_RETRIES - 1) {
-      console.log(`[pipeline] Compiler errors found — retry ${attempt + 1}/${MAX_RETRIES}`);
+      log("info", "Compiler errors found — retrying", { projectId, runId, attempt: attempt + 1, maxRetries: MAX_RETRIES });
       const fixStepId = await createStep(runId, `Fix errors (retry ${attempt + 1})`);
       await runCoding(ctx, result.compilerErrors);
       await completeStep(fixStepId);
@@ -446,7 +498,7 @@ async function continueFromCoding(ctx: PipelineContext): Promise<void> {
   }
 
   if (!validationPassed) {
-    console.warn('[pipeline] Validation did not pass after retries — continuing to build');
+    log("warn", "Validation did not pass after retries — continuing to build", { projectId, runId });
   }
 
   // ---- Install + Build ----
@@ -467,7 +519,7 @@ async function continueFromCoding(ctx: PipelineContext): Promise<void> {
     if (project) {
       const { templates } = await import("@brickops/notifications");
       const msg = templates.buildSuccess(project, { filesCreated, dependenciesInstalled: true });
-      await sendWhatsApp(operatorJid, msg);
+      await deliverWhatsApp(undefined, operatorJid, msg, 'pipeline_update', projectId);
     }
   }
 
@@ -475,11 +527,18 @@ async function continueFromCoding(ctx: PipelineContext): Promise<void> {
   await setStatus(projectId, "ready_to_deploy");
 
   await prisma.run.update({ where: { id: runId }, data: { currentStage: "ready_to_deploy", finishedAt: new Date() } });
+
+  bus.emit({
+    type: 'run.completed',
+    runId,
+    projectId,
+    timestamp: Date.now(),
+  });
   
   // Capture screenshot and send via WhatsApp
   await captureAndSendScreenshot(projectId, runId);
   
-  console.log(`[pipeline] Edit run completed for project ${projectId}`);
+  log("info", "Edit run completed", { projectId, runId });
 }
 
 /**
@@ -529,7 +588,7 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
     if (project) {
       const { templates } = await import("@brickops/notifications");
       const msg = templates.planApproval(project, approval.summary, approval.riskLevel);
-      await sendWhatsApp(operatorJid, msg);
+      await deliverWhatsApp(undefined, operatorJid, msg, 'pipeline_update', projectId);
     }
   }
 
@@ -561,6 +620,16 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
   const indexStepId = await createStep(runId, "Workspace indexing");
   await completeStep(indexStepId);
 
+  // ---- Stage 5b: Scaffold (baseline project files) ----
+  await setStatus(projectId, "scaffolding");
+  const scaffoldStepId = await createStep(runId, "Project scaffolding");
+  try {
+    await runScaffold(ctx);
+  } catch (err: any) {
+    log("warn", "Scaffold failed (non-fatal)", { projectId, runId, error: err.message });
+  }
+  await completeStep(scaffoldStepId);
+
   // ---- Stage 6: Coding (Parallel or Sequential) ----
   await setStatus(projectId, "routing_task");
   await setStatus(projectId, "coding");
@@ -580,7 +649,7 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
     try {
       const data = JSON.parse(parallelTasksThread.content);
       if (data.parallelTasks && Array.isArray(data.parallelTasks) && data.parallelTasks.length > 0) {
-        console.log(`[pipeline] Using parallel coding with ${data.parallelTasks.length} agents`);
+        log("info", "Using parallel coding", { projectId, runId, agentCount: data.parallelTasks.length });
         const codeStepId = await createStep(runId, `Code generation (${data.parallelTasks.length} parallel agents)`);
         await runParallelCoding(ctx, data.parallelTasks);
         await completeStep(codeStepId);
@@ -611,7 +680,7 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
     }
 
     if (result.compilerErrors && attempt < MAX_RETRIES - 1) {
-      console.log(`[pipeline] Compiler errors found — retry ${attempt + 1}/${MAX_RETRIES}`);
+      log("info", "Compiler errors found — retrying", { projectId, runId, attempt: attempt + 1, maxRetries: MAX_RETRIES });
       const fixStepId = await createStep(runId, `Fix errors (retry ${attempt + 1})`);
       await runCoding(ctx, result.compilerErrors);
       await completeStep(fixStepId);
@@ -621,7 +690,7 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
   }
 
   if (!validationPassed) {
-    console.warn('[pipeline] Validation did not pass after retries — continuing to build');
+    log("warn", "Validation did not pass after retries — continuing to build", { projectId, runId });
   }
 
   // ---- Stage 8: Install + Build ----
@@ -646,7 +715,7 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
         filesCreated,
         dependenciesInstalled: true,
       });
-      await sendWhatsApp(operatorJid, msg);
+      await deliverWhatsApp(undefined, operatorJid, msg, 'pipeline_update', projectId);
     }
   }
 
@@ -664,9 +733,16 @@ async function continueFromPlanning(ctx: PipelineContext): Promise<void> {
     data: { currentStage: "ready_to_deploy", finishedAt: new Date() },
   });
 
+  bus.emit({
+    type: 'run.completed',
+    runId,
+    projectId,
+    timestamp: Date.now(),
+  });
+
   await captureAndSendScreenshot(projectId, runId);
 
-  console.log(`[pipeline] Pipeline completed for project ${projectId}`);
+  log("info", "Pipeline completed", { projectId, runId });
 }
 
 /**
@@ -717,13 +793,12 @@ async function handlePipelineError(
     },
   });
 
-  await prisma.run.update({
-    where: { id: ctx.runId },
-    data: {
-      currentStage: "failed",
-      failureReason: errorMessage,
-      finishedAt: new Date(),
-    },
+  bus.emit({
+    type: 'run.failed',
+    runId: ctx.runId,
+    projectId,
+    reason: errorMessage,
+    timestamp: Date.now(),
   });
 
   // Send failure notification directly
@@ -736,7 +811,7 @@ async function handlePipelineError(
     if (project) {
       const { templates } = await import("@brickops/notifications");
       const msg = templates.buildFailed(project, errorMessage);
-      await sendWhatsApp(operatorJid, msg);
+      await deliverWhatsApp(undefined, operatorJid, msg, 'pipeline_update', projectId);
     }
   }
 }
@@ -762,8 +837,6 @@ function waitForApproval(approvalId: string, projectId: string): Promise<void> {
     };
     poll();
 
-    console.log(
-      `[pipeline] Waiting for approval ${approvalId} on project ${projectId}...`,
-    );
+    log("info", "Waiting for approval", { projectId, approvalId });
   });
 }

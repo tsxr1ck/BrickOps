@@ -58,6 +58,7 @@ export interface Message {
   parts: ContentPart[];
   modelId?: string;
   toolCalls?: ToolCall[];
+  reasoningContent?: string;
   createdAt: number;
   updatedAt: number;
 }

@@ -6,9 +6,9 @@ import { approvalRoutes } from "./routes/approvals";
 import { runRoutes } from "./routes/runs";
 import { eventRoutes } from "./routes/events";
 import { whatsappRoutes } from "./routes/whatsapp";
+import { sessionRoutes } from "./routes/sessions";
 import { workspaceRoutes } from "./routes/workspace";
 import { createOrchestrator } from "@brickops/orchestrator";
-import { bus } from "@brickops/events";
 
 /**
  * BrickOps API Server
@@ -41,6 +41,7 @@ app.route("/projects", projectRoutes);
 app.route("/projects", workspaceRoutes);
 app.route("/approvals", approvalRoutes);
 app.route("/runs", runRoutes);
+app.route("/sessions", sessionRoutes);
 app.route("/events", eventRoutes);
 app.route("/whatsapp", whatsappRoutes);
 

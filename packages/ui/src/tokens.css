@@ -1,32 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  /* ── Brand ── */
-  --bo-brand-hue: 18;
-  --bo-brand-sat: 90%;
-  --bo-brand-light: 58%;
+  /* ── Brand (cool neutral blue — used sparingly) ── */
+  --bo-brand-hue: 215;
+  --bo-brand-sat: 35%;
+  --bo-brand-light: 60%;
   --bo-brand: hsl(var(--bo-brand-hue), var(--bo-brand-sat), var(--bo-brand-light));
-  --bo-brand-dim: hsl(var(--bo-brand-hue), calc(var(--bo-brand-sat) - 10%), calc(var(--bo-brand-light) - 12%));
-  --bo-brand-glow: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 70%);
-  --bo-brand-subtle: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 20%);
+  --bo-brand-dim: hsl(var(--bo-brand-hue), calc(var(--bo-brand-sat) - 10%), calc(var(--bo-brand-light) - 14%));
+  --bo-brand-glow: hsl(var(--bo-brand-hue), calc(var(--bo-brand-sat) + 10%), 72%);
+  --bo-brand-subtle: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 22%);
 
-  /* ── Surfaces ── */
-  --bo-bg: #0f0e0c;
-  --bo-bg-raised: #1a1815;
-  --bo-bg-surface: #201e1a;
-  --bo-bg-elevated: #2a2722;
+  /* ── Surfaces — dark, neutral, lifted panels ── */
+  --bo-bg: #0d0d0f;
+  --bo-bg-raised: #141417;
+  --bo-bg-surface: #1c1c20;
+  --bo-bg-elevated: #252529;
   --bo-bg-overlay: rgba(0, 0, 0, 0.65);
-  --bo-bg-input: #161412;
+  --bo-bg-input: #111114;
 
   /* ── Text ── */
-  --bo-text: #f0ebe3;
-  --bo-text-secondary: #a0988c;
-  --bo-text-tertiary: #6b655c;
-  --bo-text-inverse: #0f0e0c;
+  --bo-text: #eae8e3;
+  --bo-text-secondary: #989692;
+  --bo-text-tertiary: #656360;
+  --bo-text-inverse: #0d0d0f;
 
   /* ── Borders ── */
-  --bo-border: #2e2a25;
-  --bo-border-strong: #4a443c;
+  --bo-border: #28282c;
+  --bo-border-strong: #3d3d42;
   --bo-border-focus: var(--bo-brand);
 
   /* ── Interactive ── */
@@ -34,16 +34,17 @@
   --bo-accent-hover: var(--bo-brand-glow);
   --bo-accent-bg: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 20%);
   --bo-accent-border: var(--bo-brand-dim);
+  --bo-accent-dim: hsl(var(--bo-brand-hue), calc(var(--bo-brand-sat) - 20%), 42%);
 
   /* ── Status ── */
-  --bo-success: #2b9a6e;
-  --bo-success-bg: rgba(43, 154, 110, 0.12);
-  --bo-warning: #e8a838;
-  --bo-warning-bg: rgba(232, 168, 56, 0.12);
-  --bo-error: #e05555;
-  --bo-error-bg: rgba(224, 85, 85, 0.12);
-  --bo-info: #5b9bd5;
-  --bo-info-bg: rgba(91, 155, 213, 0.12);
+  --bo-success: #3aa67a;
+  --bo-success-bg: rgba(58, 166, 122, 0.12);
+  --bo-warning: #d9a344;
+  --bo-warning-bg: rgba(217, 163, 68, 0.12);
+  --bo-error: #d95858;
+  --bo-error-bg: rgba(217, 88, 88, 0.12);
+  --bo-info: #6ba3d6;
+  --bo-info-bg: rgba(107, 163, 214, 0.12);
 
   /* ── Typography ── */
   --bo-font-sans: 'Inter', system-ui, -apple-system, sans-serif;
@@ -58,7 +59,7 @@
   --bo-text-3xl: 1.875rem;   /* 30px */
 
   --bo-leading-tight: 1.25;
-  --bo-leading-normal: 1.55;
+  --bo-leading-normal: 1.5;
 
   --bo-weight-normal: 400;
   --bo-weight-medium: 500;
@@ -77,7 +78,7 @@
   --bo-space-10: 40px;
   --bo-space-12: 48px;
 
-  /* ── Radius (industrial — slightly sharp) ── */
+  /* ── Radius ── */
   --bo-radius-sm: 4px;
   --bo-radius-md: 6px;
   --bo-radius-lg: 10px;
@@ -89,7 +90,7 @@
   --bo-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.2);
   --bo-shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.25);
   --bo-shadow-xl: 0 8px 40px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.3);
-  --bo-shadow-brand: 0 2px 20px hsla(var(--bo-brand-hue), var(--bo-brand-sat), var(--bo-brand-light), 0.15);
+  --bo-shadow-brand: 0 2px 20px hsla(var(--bo-brand-hue), var(--bo-brand-sat), var(--bo-brand-light), 0.12);
 
   /* ── Transitions ── */
   --bo-transition-fast: 100ms ease;
@@ -103,10 +104,48 @@
   --bo-z-fab: 400;
 
   /* ── Layout ── */
-  --bo-header-height: 56px;
+  --bo-header-height: 52px;
   --bo-bottom-nav-height: 56px;
-  --bo-nav-rail-width: 68px;
+  --bo-nav-rail-width: 64px;
   --bo-tap-target: 44px;
+
+  /* ── Semantic Typography Roles ── */
+  --bo-title-large: var(--bo-text-xl);
+  --bo-title: var(--bo-text-lg);
+  --bo-title-small: var(--bo-text-base);
+  --bo-body: var(--bo-text-base);
+  --bo-body-large: var(--bo-text-lg);
+  --bo-body-small: var(--bo-text-sm);
+  --bo-label: var(--bo-text-xs);
+  --bo-label-weight: var(--bo-weight-medium);
+  --bo-title-weight: var(--bo-weight-semibold);
+  --bo-headline-weight: var(--bo-weight-bold);
+}
+
+:root[data-theme='light'] {
+  --bo-bg: #f4f3f0;
+  --bo-bg-raised: #eeede9;
+  --bo-bg-surface: #e6e4df;
+  --bo-bg-elevated: #ddd9d2;
+  --bo-bg-overlay: rgba(0, 0, 0, 0.15);
+  --bo-bg-input: #ffffff;
+
+  --bo-text: #161514;
+  --bo-text-secondary: #5c5a55;
+  --bo-text-tertiary: #94928c;
+
+  --bo-border: #d4d2cc;
+  --bo-border-strong: #b0ada5;
+
+  --bo-brand: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 40%);
+  --bo-brand-dim: hsl(var(--bo-brand-hue), calc(var(--bo-brand-sat) - 8%), 32%);
+  --bo-brand-glow: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 36%);
+  --bo-brand-subtle: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 88%);
+
+  --bo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --bo-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.07);
+  --bo-shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.09);
+  --bo-shadow-xl: 0 8px 40px rgba(0, 0, 0, 0.11);
 }
 
 /* ───────── Base Reset ───────── */
@@ -170,29 +209,17 @@ input, textarea, select {
   background: var(--bo-border-strong);
 }
 
-/* ───────── Light mode overrides ───────── */
-[data-theme='light'] {
-  --bo-bg: #f5f2ed;
-  --bo-bg-raised: #f0ece6;
-  --bo-bg-surface: #eae5dd;
-  --bo-bg-elevated: #e0dad1;
-  --bo-bg-overlay: rgba(0, 0, 0, 0.2);
-  --bo-bg-input: #ffffff;
+/* ───────── Animations ───────── */
+@keyframes bo-spin {
+  to { transform: rotate(360deg); }
+}
 
-  --bo-text: #1c1a17;
-  --bo-text-secondary: #5e5850;
-  --bo-text-tertiary: #948c82;
+@keyframes bo-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 
-  --bo-border: #d4cec5;
-  --bo-border-strong: #b0a89c;
-
-  --bo-brand: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 42%);
-  --bo-brand-dim: hsl(var(--bo-brand-hue), calc(var(--bo-brand-sat) - 8%), 34%);
-  --bo-brand-glow: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 38%);
-  --bo-brand-subtle: hsl(var(--bo-brand-hue), var(--bo-brand-sat), 88%);
-
-  --bo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --bo-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --bo-shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.1);
-  --bo-shadow-xl: 0 8px 40px rgba(0, 0, 0, 0.12);
+@keyframes bo-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }

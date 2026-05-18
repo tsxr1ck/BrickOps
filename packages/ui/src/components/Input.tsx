@@ -3,8 +3,8 @@ import { type CSSProperties, type ReactNode, useState, useRef } from 'react';
 const wrapperStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: '8px',
-  padding: '8px 12px',
+  gap: 'var(--bo-space-2)',
+  padding: 'var(--bo-space-2) var(--bo-space-3)',
   borderRadius: 'var(--bo-radius-sm)',
   transition: 'all var(--bo-transition-fast)',
 };

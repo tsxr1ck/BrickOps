@@ -1,4 +1,4 @@
-import { Card, StatusDot, Button } from '@brickops/ui';
+import { Card, StatusDot, Button, PageHeader } from '@brickops/ui';
 import { Smartphone, Moon, Sun, Monitor } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useState, useEffect, useCallback, type CSSProperties } from 'react';
@@ -6,7 +6,6 @@ import { useState, useEffect, useCallback, type CSSProperties } from 'react';
 const API_BASE = 'http://localhost:3001';
 
 const pageStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 'var(--bo-space-4)' };
-const titleStyle: CSSProperties = { fontSize: 'var(--bo-text-xl)', fontWeight: 'var(--bo-weight-bold)' as any, color: 'var(--bo-text)', marginBottom: 'var(--bo-space-2)' };
 const sectionTitle: CSSProperties = { fontSize: 'var(--bo-text-base)', fontWeight: 'var(--bo-weight-semibold)' as any, color: 'var(--bo-text)', marginBottom: 'var(--bo-space-3)' };
 const row: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--bo-space-3)' };
 const label: CSSProperties = { fontSize: 'var(--bo-text-sm)', color: 'var(--bo-text-secondary)' };
@@ -71,7 +70,7 @@ export function SettingsPage() {
 
   return (
     <div style={pageStyle}>
-      <h1 style={titleStyle}>Settings</h1>
+      <PageHeader title="Settings" subtitle="Connection, providers, and appearance." />
 
       {/* WhatsApp Connection */}
       <div>

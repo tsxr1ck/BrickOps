@@ -19,9 +19,11 @@ model Project {
   updatedAt      DateTime  @updatedAt
 
   threads        ProjectThread[]
+  sessions       Session[]
   runs           Run[]
   approvals      Approval[]
   workspaces     Workspace[]
+  fileIndices    FileIndex[]
   editPlans      EditPlan[]
 }
 
@@ -82,17 +84,39 @@ model Workspace {
   updatedAt   DateTime @updatedAt
 }
 
+model Session {
+  id             String          @id @default(cuid())
+  projectId      String
+  project        Project         @relation(fields: [projectId], references: [id])
+  title          String?
+  source         String          @default("web") // web, whatsapp
+  status         String          @default("idle") // idle, running, error
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  messages       SessionMessage[]
+}
+
+model SessionMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String   // user, assistant, system
+  content   String
+  createdAt DateTime @default(now())
+}
+
 model FileIndex {
   id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id])
   filePath      String
   hash          String
   language      String
-  symbols       Json     // array of symbols
-  imports       Json     // array of imports
-  exports       Json     // array of exports
+  symbols       Json
+  imports       Json
+  exports       Json
   lastIndexedAt DateTime @default(now())
-
-  projectId     String
 }
 
 model PromptUsage {
